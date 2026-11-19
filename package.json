@@ -1,0 +1,62 @@
+{
+  "name": "africa-bingo-local",
+  "version": "4.1.0",
+  "description": "Africa Bingo - fully local edition",
+  "main": "main.js",
+  "author": "Mart Softwares",
+  "license": "ISC",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/license-service.js && node tests/commission-settings.js && node tests/offline-audit.js && node tests/voucher-service.js && node tests/mobile-room.js && node tests/guarded-mobile-room.js && node tests/local-flow.js",
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
+  },
+  "dependencies": {
+    "sqlite3": "6.0.1"
+  },
+  "devDependencies": {
+    "electron": "44.11.5",
+    "electron-builder": "26.15.3"
+  },
+  "overrides": {
+    "minimatch": "11.0.9"
+  },
+  "build": {
+    "appId": "com.africabingo.local",
+    "productName": "Africa Bingo Local",
+    "asar": true,
+    "npmRebuild": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!africa-bingo-local-data{,/**}",
+      "!database{,/**}",
+      "!release{,/**}",
+      "!dist{,/**}",
+      "!tests{,/**}",
+      "!.github{,/**}",
+      "!key.txt",
+      "!obfust.json",
+      "!forge.config.js",
+      "!*.license"
+    ],
+    "win": {
+      "icon": "img/logo.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Africa Bingo Local"
+    },
+    "artifactName": "Africa-Bingo-Local-Setup-${version}-${arch}.${ext}"
+  }
+}

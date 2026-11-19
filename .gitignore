@@ -1,0 +1,30 @@
+node_modules/
+dist/
+out/
+
+# Mutable local state and customer data
+africa-bingo-local-data/
+database/*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.license
+
+# Release binaries are published as GitHub Release assets, not Git blobs
+release/*
+!release/README.md
+
+# Owner-side secrets and private references
+key.txt
+obfust.json
+*.key
+*.p12
+*.pfx
+*.pem
+!license-public.pem
+!voucher-public.pem
+.env
+.env.*
+
+.DS_Store
+npm-debug.log*

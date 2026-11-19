@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>Africa Bingo Local - Cartela</title>
+  <link rel="stylesheet" href="/mobile.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">LOCAL CARTELA ROOM</div>
+      <h1 id="bingoName">Africa Bingo Local</h1>
+      <p id="roundText">Game 1</p>
+      <p id="cartelaText" class="cartela-type">Loading cartela…</p>
+    </section>
+
+    <section id="joinCard" class="card">
+      <h2>Join this Bingo room</h2>
+      <p class="muted">Connected only through the local hotspot or LAN. Enter a name so the host can identify this phone.</p>
+      <label for="playerName">Player name</label>
+      <input id="playerName" maxlength="40" autocomplete="name" placeholder="Player 1">
+      <button id="joinBtn" class="primary">Join Room</button>
+    </section>
+
+    <section id="roomCard" class="card hidden">
+      <div class="status-row">
+        <div>
+          <div id="accessBadge" class="badge">Connecting…</div>
+          <div id="statusText" class="status-text">Connecting to the desktop…</div>
+        </div>
+        <div id="selectedCount" class="count">0 selected</div>
+      </div>
+
+      <div id="message" class="message hidden"></div>
+      <div id="grid" class="grid"></div>
+
+      <p class="legend">
+        <span><i class="dot mine"></i> Yours</span>
+        <span><i class="dot taken"></i> Taken</span>
+      </p>
+    </section>
+  </main>
+  <script src="/mobile.js"></script>
+</body>
+</html>

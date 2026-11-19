@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.200">
+    <!-- Icons -->
+    <link rel="shortcut icon" href="../../../img/logo.ico" type="image/x-icon">
+    <link rel="icon" href="../../../img/logo.png" type="image/png">
+    <link rel="apple-touch-icon" href="../../../img/logo.png">
+
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+
+    <title>የ Africa Bingo መረጃ</title>
+
+    <!-- ====================  ALL ORIGINAL STYLES (UNCHANGED) ==================== -->
+    <style>
+        body {margin:0;padding:0;font-size:16px;background-color:#141415;}
+        p {color:white;}
+        .navbar {width:100%;height:8vh;display:flex;align-items:center;gap:30vw;position:sticky;top:0;z-index:1000;background:linear-gradient(to left,#1a1a1c,#4e544c,#353a3e);margin-bottom:2vh;}
+        .logo {margin-left:3vw;height:7vh;margin-top:1vh;transition:transform .3s ease,filter .3s ease;}
+        .logo:hover {transform:scale(1.1);filter:brightness(90%);}
+        .logout_button {position:fixed;right:5vw;margin-top:.5vh;font-size:14px;border-color:#713434;border-radius:50%;transition:.3s;font-weight:bolder;width:7vh;height:7vh;background-color:#713434;}
+        #root {display:block;}
+        .agentinfo_container {display:flex;height:100vh;padding:0;}
+        .agent_info_contents {height:100vh;width:97%;display:flex;flex-direction:row;align-items:top;}
+        .userInfo {width:30vw;height:70vh;box-shadow:0 2px 2px #1c0f0f;border-radius:8px;overflow:hidden;transition:0.1s ease-out;z-index:2;background:linear-gradient(to bottom,#434343,#151515,#372f2f);margin-left:1vh;display:flex;flex-direction:column;align-items:center;padding:1vh;}
+        .userinfo_text {color:#ff4040;font-size:24px;margin:0;}
+        .list,.date_list {width:90%;margin:1vh 0;}
+        .list_content {display:flex;align-items:center;gap:1vw;}
+        .keyword {font-size:16px;color:#ff4a4a;margin:0;width:40%;}
+        .input {margin:0;padding:1vh;background-color:#2f2e2e;border-radius:5px;flex-grow:1;text-align:center;}
+        #from-date,#to-date {width:80px;background-color:#2f2e2e;border-radius:5px;}
+        .date_text_container {display:flex;align-items:center;gap:1vw;}
+        .date-picker-container {display:flex;align-items:center;gap:1vw;margin:1vh 0;border:3px solid rgb(221,92,92);border-radius:3px;width:140px;}
+        .date_search_button {padding:1vh 2vh;background-color:#ff6060;border:none;border-radius:5px;color:#fff;font-weight:bold;cursor:pointer;transition:0.2s ease-out;}
+        .date_search_button:hover {background-image:linear-gradient(to right,#f071d0,#7a63ee);}
+        .show_more_info_button {margin-top:2vh;padding:1vh 2vh;background-color:#ff6060;border:none;border-radius:5px;color:#fff;font-weight:bold;cursor:pointer;transition:0.2s ease-out;}
+        .show_more_info_button:hover {background-image:linear-gradient(to right,#f071d0,#7a63ee);}
+        .more_user_info_Container {background-color:#211f1f;margin-top:5vh;margin-left:5vh;padding-top:2vh;padding-bottom:23vh;padding-right:3vw;display:none;width:65vw;height:35vh;overflow-y:scroll;overflow-x:hidden;z-index:2;gap:2vh;flex-direction:column;align-items:center;justify-content:top;box-shadow:0 0 8px #000;opacity:0.8;}
+        .more_user_info_container_top_content {width:60vw;height:10vh;display:flex;align-items:center;}
+        .package_info_text {width:50vw;display:inline;margin-left:5vw;color:#cf4242;font-size:3vh;position:absolute;left:45vw;top:18vh;}
+        .table_close_button {width:3vw;height:3vh;cursor:pointer;}
+        .table_options_container {width:60vw;height:fit-content;padding-top:2vw;padding-bottom:2vw;display:flex;gap:2vh;flex-direction:column;align-items:center;justify-content:center;}
+        .table_option_item {width:30vw;height:4vh;padding-top:2vw;padding-bottom:2vw;display:flex;align-items:center;justify-content:center;font-size:2vw;box-shadow:0 0 8px #000;transition:0.1s ease-in-out;color:#fff;background-color:#161313;cursor:pointer;}
+        .table_option_item:hover {box-shadow:0 6px 6px #36123c;border:3px solid;border-image:linear-gradient(to left,#4f4871,#6d4262) 1;}
+        .options_circle {width:3vw;height:3vw;background-color:#713434;border-radius:50%;position:absolute;right:5vw;}
+        .options_circle:hover {padding:0.12vh;}
+        @media (max-width:900px){
+            .agent_info_contents {flex-direction:column;align-items:center;}
+            .userInfo {width:85vw;height:75vh;}
+            .list, .date_list {width:80vw;}
+            .keyword {font-size:16px;width:40vw;}
+            .more_user_info_Container {margin-left:0;width:80vw;}
+            .more_user_info_container_top_content {width:80vw;height:10vh;gap:4vw;}
+            .package_info_text {margin:0;font-size:3vw;display:flex;align-items:center;justify-content:center;top:64vh;left:14vw;}
+            .table_option_item {width:70vw;height:10vh;font-size:5vw;}
+            .table-wrapper {left:10vw;top:74vh;width:80vw;height:36vh;}
+            .table-wrapper::-webkit-scrollbar {width:7vw;}
+            .table-wrapper::-webkit-scrollbar-track {background:#302828;border-radius:1vw;}
+            .table-wrapper::-webkit-scrollbar-thumb {background-color:#6e5a5a;border-radius:1vw;border:1px solid #f1f1f1;height:6vh;}
+            .maintable {width:100vw;}
+            th {width:22vw;}
+            .table_back_button {margin:0;width:10vw;left:5vh;top:68vh;}
+        }
+        .light-theme .userInfo{background:linear-gradient(to bottom,#e0e0e0,#f0f0f0,#d0d0d0)!important;}
+        .light-theme .input{background-color:#e0e0e0!important;color:#000!important;}
+        .light-theme .more_user_info_Container{background:#e8f0ef!important;}
+        .light-theme .table_option_item{background-color:#d0d0d0!important;color:#000!important;}
+        .more_user_info_Container{max-height:300px;overflow-y:auto;overflow-x:hidden;}
+        .more_user_info_Container::-webkit-scrollbar{width:15px;height:12px;}
+        .more_user_info_Container::-webkit-scrollbar-thumb{background:#686868;border-radius:6px;}
+        .more_user_info_Container::-webkit-scrollbar-track{background:#1d1c1c;border-radius:6px;}
+        .table-wrapper::-webkit-scrollbar{width:15px;height:12px;}
+        .table-wrapper::-webkit-scrollbar-thumb{background:#df9999;border-radius:1px;}
+        .table-wrapper::-webkit-scrollbar-track{background:#1d1c1c;border-radius:6px;}
+        .table-wrapper{position:absolute;top:33vh;left:34vw;height:40vh;width:60vw;overflow:scroll;}
+        .maintable{border-collapse:collapse;width:100%;}
+        .maintable th,.maintable td{padding:8px;border-bottom:1px solid #ddd;text-align:left;color:white;border-right:1px solid #ddd;}
+        .maintable th{background-color:#333;color:white;}
+        .table_back_button{background-color:#ff6060;border:none;border-radius:5px;color:#fff;font-weight:bold;cursor:pointer;padding:10px;margin-bottom:20px;}
+        .active{background-color:#816c6c;}
+        .false{background-color:#383333;}
+        .voice_box{border:1px solid black;width:20vw;height:5vh;display:flex;text-align:center;justify-content:center;align-items:center;font-size:2vw;color:#fff;border-radius:1vw;cursor:pointer;margin:5px;}
+        #voice_box_container{margin-top:4vh;}
+        .update_voice{border:1px solid rgb(255,168,168);width:16vw;color:#f0f8ff;border:none;border-radius:2px;background-color:#e15d5d;text-align:center;transition:.3s;cursor:pointer;}
+        .call_timing_input{width:6vw;height:5vh;outline:none;border:none;border-radius:2vh;margin-left:6vw;}
+        .update_time{border:1px solid rgb(255,168,168);width:7vw;margin-left:6vw;color:#f0f8ff;border:none;border-radius:2px;background-color:#e15d5d;text-align:center;transition:.3s;cursor:pointer;}
+        .update_time:hover{opacity:60%;border:none;}
+        .shop-update-alert{position:fixed;top:50%;left:-400px;transform:translateY(-50%);width:400px;padding:25px;background-color:#1bb35c;color:#fff;border-radius:10px;box-shadow:0 6px 16px rgba(0,0,0,.4);font-size:1.3rem;font-weight:900;z-index:999;transition:left .8s ease-in-out;pointer-events:none;display:none;align-items:center;justify-content:center;text-align:center;min-height:90px;letter-spacing:.5px;}
+        .shop-update-alert.show{display:flex;left:calc(50% - 200px);animation:stayThenExit 30s ease-in-out forwards;}
+       
+        .commission_box{border:1px solid #554b4b;width:18vw;min-height:5vh;display:flex;text-align:center;justify-content:center;align-items:center;font-size:1.1rem;color:#fff;border-radius:.5rem;cursor:pointer;margin:5px;padding:4px;}
+        #commission_box_container{margin-top:1vh;width:56vw;color:#fff;padding-bottom:3vh;}
+        .commission_editor{display:flex;flex-direction:column;gap:12px;}
+        .commission_mode_select,.commission_number_input{background:#252525;color:#fff;border:1px solid #826565;border-radius:5px;padding:9px;box-sizing:border-box;}
+        .commission_mode_select{width:min(420px,100%);font-size:1rem;}
+        .commission_number_input{width:110px;}
+        .commission_section{display:none;background:#211f1f;border:1px solid #4f4646;border-radius:8px;padding:12px;}
+        .commission_section.active{display:block;}
+        .commission_presets{display:flex;flex-wrap:wrap;}
+        .commission_grid{display:grid;grid-template-columns:minmax(170px,1fr) 120px;gap:8px 12px;align-items:center;max-width:480px;}
+        .commission_range_row{display:grid;grid-template-columns:90px 90px 110px auto;gap:8px;align-items:center;margin-bottom:8px;}
+        .commission_range_row .commission_number_input{width:100%;}
+        .commission_remove,.add_commission_range,.update_commission{border:0;border-radius:5px;color:#fff;background:#713434;padding:9px 12px;cursor:pointer;}
+        .add_commission_range{background:#4c5361;}
+        .update_commission{width:180px;background:#e15d5d;font-weight:bold;}
+        .commission_hint{color:#cfc5c5;font-size:.9rem;margin:5px 0 10px;}
+        .commission_preview{background:#151515;border-left:4px solid #e15d5d;padding:10px;max-width:460px;}
+        .commission_preview strong{color:#ff8e8e;}
+        #commmission-success{min-height:20px;}
+        @media (max-width:900px){
+            #commission_box_container{width:76vw;}
+            .commission_box{width:31vw;font-size:.95rem;}
+            .commission_range_row{grid-template-columns:1fr 1fr;}
+        }
+      
+       
+        @keyframes stayThenExit{0%{left:-400px;}10%,90%{left:calc(50% - 200px);}100%{left:100%;}}
+    </style>
+</head>
+<body>
+<div id="root">
+
+    <!-- SLIDING UPDATE ALERT -->
+    <div id="shopUpdateAlert" class="shop-update-alert">
+        <p id="alertMessage">Default Update Message</p>
+    </div>
+
+    <!-- NAVBAR -->
+    <div class="navbar">
+        <a href="../dashboard/control.html"><img src="../../../img/logo.png" alt="Logo" class="logo"></a>
+        <a href="../dashboard/control.html" class="logout_button"></a>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="agentinfo_container">
+        <div class="agent_info_contents">
+
+            <!-- LEFT PANEL -->
+            <div class="userInfo" data-shop-id="">
+                <h3 class="userinfo_text">የ<span id="shopNameText"></span> መረጃ</h3>
+
+                <div class="list"><div class="list_content"><h3 class="keyword">የኤጀንት ስም :</h3><p id="agentName" class="input">Loading...</p></div></div>
+                <div class="list"><div class="list_content"><h3 class="keyword">አድራሻ :</h3><p id="Adress" class="input">Loading...</p></div></div>
+
+                <div class="date_list">
+                    <div class="date_text_container"><p class="keyword">ቀን :</p><p class="date_text">--:--:----</p></div>
+                    <div class="date-picker-container"><label style="color:#fff;" for="from-date">ከ :</label><input type="date" id="from-date"></div>
+                    <div class="date-picker-container"><label style="color:#fff;" for="to-date">እስከ :</label><input type="date" id="to-date"></div>
+                    <button class="date_search_button">ቀጥል</button>
+                </div>
+
+                <div class="list list2"><h3 class="keyword">የቀን ገቢ :</h3><p id="daily_income" class="input">0</p></div>
+                <div class="list"><h3 class="keyword">ቀሪ የፓኬጅ መጠን :</h3><p id="package_amount" class="input">Loading...</p></div>
+
+                <button id="show_more_info_button" class="show_more_info_button">ተጨማሪ መረጃ</button>
+            </div>
+
+            <!-- RIGHT PANEL (MORE INFO) -->
+            <div class="more_user_info_Container">
+                <div class="more_user_info_container_top_content">
+                    <h2 class="package_info_text">አፍሪካ ቢንጎ ሙሉ የፓኬጅ መረጃ</h2>
+                    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAYAAAA7MK6iAAAACXBIWXMAAAsTAAALEwEAmpwYAAAA00lEQVR4nO2WUQ6CMAyGuYRGz0FIR8I1+kDdjeFJHzwOpvKCREfb1SxR/qQJgf351sJKq2rXXyq27ZFCGDn4OsM/iP3YdYce4EohTM8AuF/q+iyFmv0073RaRg9wk+yc1/DatZ8zN4El8ARUBsZ1qZbxoWxbHmya0yZYC3eDauDuUMl74/upZ5Zj+KJkVt6ZmuGeUDH8G1ApWNPh3EvtBkfDx5UNjyWOEwqag6W9JqXpSG5wNLRBFziV+i1SqUEA34wumo6U5Y/zsDaohjVH/67f0ANwoOS6T8Nh+QAAAABJRU5ErkJggg==" class="table_close_button" id="close-button">
+                </div>
+
+                <!-- OPTION BUTTONS -->
+                <div class="table_options_container" id="options_container">
+                    <div class="table_option_item">Show Data Table</div>
+                    <div class="table_option_item">Change Call Voice</div>
+                    <div class="table_option_item">Edit Call Timing</div>
+                    <div class="table_option_item">Change Commission</div>
+                    <div class="table_option_item">Change Theme</div>
+                </div>
+
+                <!-- SALES TABLE -->
+                <div class="table-wrapper" id="data_table" style="display:none;">
+                    <button class="table_back_button">Back</button>
+                    <table class="maintable">
+                        <thead>
+                            <tr>
+                                <th>የካርቴላ ብዛት</th><th>የካርቴላ ዋጋ</th><th>የተሰበሰበው</th>
+                                <th>የአሸናፊ ብር</th><th>የቤቱ ብር</th><th>ቀሪ ፓኬጅ</th>
+                                <th>ሰአት</th><th>ቀን</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sales_body"><tr><td colspan="8" style="text-align:center;">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+
+                <!-- VOICE SELECTION -->
+                <div id="voice_box_container" style="display:none;">
+                    <button class="table_back_button voice_back">Back</button>
+                    <div class="voice_box" data-voice="A">Voice Amharic</div>
+                    <div class="voice_box" data-voice="O">Voice Oromiffa</div>
+                    <div class="voice_box" data-voice="TG">Voice Tigrigna Female</div>
+                    <div class="voice_box" data-voice="AF">Voice With Fun</div>
+                    <div class="voice_box" data-voice="m">Voice Amharic Female</div>
+                    <div class="voice_box" data-voice="T">Voice Tigrigna Male</div>
+                    <div class="voice_box" data-voice="E">Voice Amharic 2</div>
+                    <button class="update_voice">Update</button>
+                    <p id="voice-success"></p>
+                </div>
+
+                <!-- CALL TIMING -->
+                <div id="voice_time_container" style="display:none;">
+                    <button class="table_back_button timing_back">Back</button>
+                    <h1>Change Call Timing (Seconds)</h1>
+                    <input type="number" min="1" max="10" class="call_timing_input" value="5">
+                    <button class="update_time">Update</button>
+                    <p id="time-gap-success"></p>
+                </div>
+
+                <div id="commission_box_container" style="display:none;">
+                    <button class="table_back_button commission_back">Back</button>
+                    <div class="commission_editor">
+                        <h2 style="margin:0;">Game Commission</h2>
+                        <label for="commission_mode">Commission method</label>
+                        <select id="commission_mode" class="commission_mode_select">
+                            <option value="preset">Africa presets</option>
+                            <option value="manual">Manual fixed percentage</option>
+                            <option value="auto">Automatic by cartela count</option>
+                            <option value="interval">Custom cartela ranges</option>
+                        </select>
+
+                        <div class="commission_section" data-mode-section="preset">
+                            <p class="commission_hint">The original Africa commission profiles remain available.</p>
+                            <div class="commission_presets">
+                                <div class="commission_box" data-commission="A">Commission Normal</div>
+                                <div class="commission_box" data-commission="O">Commission Light</div>
+                                <div class="commission_box" data-commission="TG">Commission Aggressive</div>
+                                <div class="commission_box" data-commission="AT">All Thirty</div>
+                                <div class="commission_box" data-commission="AE">All Eighteen</div>
+                                <div class="commission_box" data-commission="ATW">All Twenty</div>
+                            </div>
+                        </div>
+
+                        <div class="commission_section" data-mode-section="manual">
+                            <div class="commission_grid">
+                                <label for="manual_commission_percent">House commission (%)</label>
+                                <input id="manual_commission_percent" class="commission_number_input" type="number" min="0" max="100" step="0.01" value="20">
+                            </div>
+                        </div>
+
+                        <div class="commission_section" data-mode-section="auto">
+                            <p class="commission_hint">Start at the base percentage, then add the increment for every cartela above the base count.</p>
+                            <div class="commission_grid">
+                                <label for="auto_base_cartelas">Base cartelas</label>
+                                <input id="auto_base_cartelas" class="commission_number_input" type="number" min="1" max="10000" step="1" value="1">
+                                <label for="auto_base_percent">Base commission (%)</label>
+                                <input id="auto_base_percent" class="commission_number_input" type="number" min="0" max="100" step="0.01" value="20">
+                                <label for="auto_increment_percent">Increase per extra cartela (%)</label>
+                                <input id="auto_increment_percent" class="commission_number_input" type="number" min="0" max="100" step="0.01" value="1">
+                            </div>
+                        </div>
+
+                        <div class="commission_section" data-mode-section="interval">
+                            <p class="commission_hint">Create non-overlapping ranges. Leave “Maximum” empty for an unlimited top range.</p>
+                            <div id="commission_rules"></div>
+                            <button type="button" id="add_commission_range" class="add_commission_range">+ Add range</button>
+                            <div class="commission_grid" style="margin-top:12px;">
+                                <label for="interval_fallback_percent">Fallback commission (%)</label>
+                                <input id="interval_fallback_percent" class="commission_number_input" type="number" min="0" max="100" step="0.01" value="20">
+                            </div>
+                        </div>
+
+                        <div class="commission_grid">
+                            <label for="commission_preview_count">Preview cartela count</label>
+                            <input id="commission_preview_count" class="commission_number_input" type="number" min="1" max="10000" step="1" value="10">
+                        </div>
+                        <div id="commission-preview" class="commission_preview">Preview: <strong>--</strong></div>
+                        <button type="button" class="update_commission">Save Commission</button>
+                    </div>
+                    <p id="commmission-success"></p>
+                </div>
+
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SCRIPTS -->
+<!-- 1. Load sales history -->
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+    const tbody = document.getElementById("sales_body");
+    try {
+        const r = await window.api.getSalesHistory();
+        tbody.innerHTML = "";
+        if (r.status === "success" && r.data?.length) {
+            r.data.forEach(row => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `<td>${row.no_cards}</td><td>${row.price}</td><td>${row.collected}</td>
+                                <td>${row.winner_price}</td><td>${row.commission}</td><td>${row.balance_after_sales}</td>
+                                <td>${row.time}</td><td>${row.date}</td>`;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No sales found.</td></tr>`;
+        }
+    } catch (e) {
+        console.error("Sales load error:", e);
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">Error loading data.</td></tr>`;
+    }
+});
+</script>
+
+<!-- 2. Load shop info -->
+<script>
+let theday;
+window.addEventListener("DOMContentLoaded", async () => {
+    try {
+        const info = await window.api.getShopInfo();
+        if (info.status === "success") {
+            document.querySelector(".userInfo").dataset.shopId = info.shop_id;
+            document.getElementById("agentName").textContent = info.shop_name;
+            document.getElementById("Adress").textContent = info.shop_address;
+            document.querySelector(".date_text").textContent = info.current_date;
+            document.getElementById("package_amount").textContent = `${info.current_balance} ETB`;
+            theday = info.current_date;
+        }
+    } catch (e) { console.error("Shop info error:", e); }
+});
+</script>
+
+<!-- 3. UI Navigation -->
+<script>
+let isVisible = false;
+document.getElementById('show_more_info_button').addEventListener('click', () => {
+    const panel = document.querySelector('.more_user_info_Container');
+    isVisible = !isVisible;
+    panel.style.display = isVisible ? 'flex' : 'none';
+});
+
+document.getElementById('close-button').addEventListener('click', () => {
+    document.querySelector('.more_user_info_Container').style.display = 'none';
+    isVisible = false;
+});
+
+document.querySelectorAll('.table_option_item').forEach(btn => {
+    btn.addEventListener('click', e => {
+        const txt = e.target.textContent.trim();
+        document.getElementById('options_container').style.display = 'none';
+        if (txt === 'Show Data Table')   document.getElementById('data_table').style.display = 'block';
+        if (txt === 'Change Call Voice') document.getElementById('voice_box_container').style.display = 'block';
+        if (txt === 'Edit Call Timing')  document.getElementById('voice_time_container').style.display = 'block';
+         if (txt === 'Change Commission') document.getElementById('commission_box_container').style.display = 'block';
+    });
+});
+
+document.querySelectorAll('.table_back_button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('options_container').style.display = 'flex';
+        document.getElementById('data_table').style.display = 'none';
+        document.getElementById('voice_box_container').style.display = 'none';
+        document.getElementById('voice_time_container').style.display = 'none';
+        document.getElementById('commission_box_container').style.display = 'none';
+    });
+});
+</script>
+
+<!-- 4. VOICE SELECTION & UPDATE (FIXED) -->
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const successMsg = document.getElementById('voice-success');
+    const clearMsg = () => setTimeout(() => successMsg.textContent = '', 3000);
+
+    async function loadCurrentVoice() {
+        try {
+            const resp = await window.api.getShopSetting();
+            if (resp?.success && resp.settings?.voicesGame) {
+                const saved = resp.settings.voicesGame;
+                document.querySelectorAll('.voice_box').forEach(b => {
+                    b.classList.toggle('active', b.dataset.voice === saved);
+                });
+            }
+        } catch (e) { console.warn('Voice load failed:', e); }
+    }
+
+    document.querySelectorAll('.voice_box').forEach(box => {
+        box.addEventListener('click', () => {
+            document.querySelectorAll('.voice_box').forEach(b => b.classList.remove('active'));
+            box.classList.add('active');
+            // Play preview safely
+            const audio = new Audio(`../game/audio/${box.dataset.voice}1.mp3`);
+            audio.play().catch(() => {});
+        });
+    });
+
+    document.querySelector('.update_voice').addEventListener('click', async () => {
+        const active = document.querySelector('.voice_box.active');
+        const code = active ? active.dataset.voice : 'A';
+
+        try {
+            const r = await window.api.updateVoicesGame(code);
+            if (r.success) {
+                successMsg.textContent = r.message || 'Voice updated!';
+                successMsg.style.color = 'green';
+            } else throw new Error(r.message);
+        } catch (e) {
+            console.error(e);
+            successMsg.textContent = 'Update failed: ' + e.message;
+            successMsg.style.color = 'red';
+        }
+        clearMsg();
+    });
+
+    await loadCurrentVoice();
+});
+</script>
+
+<!-- 5. CALL TIMING (IPC) -->
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const input = document.querySelector('.call_timing_input');
+    const successMsg = document.getElementById('time-gap-success');
+    const clearMsg = () => setTimeout(() => successMsg.textContent = '', 3000);
+
+    try {
+        const resp = await window.api.getShopSetting();
+        if (resp?.success && resp.settings?.gameTimeGap) {
+            input.value = Math.round(resp.settings.gameTimeGap / 1000);
+        }
+    } catch (e) { console.warn(e); }
+
+    document.querySelector('.update_time').addEventListener('click', async () => {
+        const sec = parseInt(input.value);
+        if (isNaN(sec) || sec < 1 || sec > 10) {
+            successMsg.textContent = 'Enter 1-10 seconds';
+            successMsg.style.color = 'red';
+            clearMsg(); return;
+        }
+        const ms = sec * 1000;
+        try {
+            const r = await window.api.updateGameTimeGap(ms);
+            if (r.success) {
+                successMsg.textContent = r.message || 'Timing updated!';
+                successMsg.style.color = 'green';
+            } else throw new Error(r.message);
+        } catch (e) {
+            successMsg.textContent = 'Update failed: ' + e.message;
+            successMsg.style.color = 'red';
+        }
+        clearMsg();
+    });
+});
+</script>
+
+
+<!-- LOCAL CUSTOM COMMISSION SETTINGS -->
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const successMsg = document.getElementById('commmission-success');
+    const modeSelect = document.getElementById('commission_mode');
+    const rulesContainer = document.getElementById('commission_rules');
+    const preview = document.getElementById('commission-preview');
+    const clearMsg = () => setTimeout(() => successMsg.textContent = '', 3000);
+    const defaults = {
+        v: 1,
+        mode: 'preset',
+        preset: 'A',
+        manualPercent: 20,
+        auto: { baseCartelas: 1, basePercent: 20, incrementPercent: 1 },
+        interval: {
+            rules: [
+                { min: 1, max: 5, percent: 20 },
+                { min: 6, max: 10, percent: 25 },
+                { min: 11, max: 20, percent: 30 },
+                { min: 21, max: 30, percent: 35 },
+                { min: 31, max: 50, percent: 40 },
+                { min: 51, max: null, percent: 50 }
+            ],
+            fallbackPercent: 20
+        }
+    };
+    const presetConfigs = {
+        A:  [{ min: 1, max: 2, percent: 0 }, { min: 3, max: 15, percent: 18 }, { min: 16, max: 40, percent: 25 }, { min: 41, max: 90, percent: 30 }, { min: 91, max: 150, percent: 50 }],
+        O:  [{ min: 1, max: 2, percent: 0 }, { min: 3, max: 19, percent: 10 }, { min: 20, max: 49, percent: 15 }, { min: 50, max: 99, percent: 20 }, { min: 100, max: 200, percent: 30 }],
+        TG: [{ min: 1, max: 2, percent: 0 }, { min: 3, max: 9, percent: 25 }, { min: 10, max: 29, percent: 35 }, { min: 30, max: 69, percent: 45 }, { min: 70, max: 140, percent: 70 }],
+        AT: [{ min: 1, max: 150, percent: 30 }],
+        AE: [{ min: 1, max: 150, percent: 18 }],
+        ATW:[{ min: 1, max: 150, percent: 20 }]
+    };
+
+    const numberValue = id => Number(document.getElementById(id).value);
+
+    function addRangeRow(rule = { min: 1, max: null, percent: 20 }) {
+        const row = document.createElement('div');
+        row.className = 'commission_range_row';
+        const fields = [
+            { className: 'range-min', placeholder: 'Minimum', value: rule.min ?? '', min: 1, max: 10000, step: 1 },
+            { className: 'range-max', placeholder: 'Maximum', value: rule.max ?? '', min: 1, max: 10000, step: 1 },
+            { className: 'range-percent', placeholder: 'Percent', value: rule.percent ?? '', min: 0, max: 100, step: 0.01 }
+        ];
+        fields.forEach(field => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = `commission_number_input ${field.className}`;
+            input.placeholder = field.placeholder;
+            input.value = field.value;
+            input.min = field.min;
+            input.max = field.max;
+            input.step = field.step;
+            input.addEventListener('input', updatePreview);
+            row.appendChild(input);
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'commission_remove';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', () => {
+            if (rulesContainer.children.length > 1) row.remove();
+            updatePreview();
+        });
+        row.appendChild(remove);
+        rulesContainer.appendChild(row);
+    }
+
+    function showMode() {
+        document.querySelectorAll('[data-mode-section]').forEach(section => {
+            section.classList.toggle('active', section.dataset.modeSection === modeSelect.value);
+        });
+        updatePreview();
+    }
+
+    function readSettings() {
+        const activePreset = document.querySelector('.commission_box.active');
+        const rules = Array.from(rulesContainer.querySelectorAll('.commission_range_row')).map(row => {
+            const maxText = row.querySelector('.range-max').value.trim();
+            return {
+                min: Number(row.querySelector('.range-min').value),
+                max: maxText === '' ? null : Number(maxText),
+                percent: Number(row.querySelector('.range-percent').value)
+            };
+        });
+        return {
+            v: 1,
+            mode: modeSelect.value,
+            preset: activePreset?.dataset.commission || 'A',
+            manualPercent: numberValue('manual_commission_percent'),
+            auto: {
+                baseCartelas: numberValue('auto_base_cartelas'),
+                basePercent: numberValue('auto_base_percent'),
+                incrementPercent: numberValue('auto_increment_percent')
+            },
+            interval: {
+                rules,
+                fallbackPercent: numberValue('interval_fallback_percent')
+            }
+        };
+    }
+
+    function previewPercent(settings, count) {
+        if (!Number.isInteger(count) || count < 1) throw new Error('Preview count must be a positive whole number.');
+        if (settings.mode === 'manual') return settings.manualPercent;
+        if (settings.mode === 'auto') {
+            const extra = Math.max(0, count - settings.auto.baseCartelas);
+            return Math.min(100, settings.auto.basePercent + extra * settings.auto.incrementPercent);
+        }
+        const rules = settings.mode === 'preset' ? presetConfigs[settings.preset] : settings.interval.rules;
+        const match = rules.find(rule => count >= rule.min && (rule.max === null || count <= rule.max));
+        if (match) return match.percent;
+        return settings.mode === 'interval' ? settings.interval.fallbackPercent : 0;
+    }
+
+    function updatePreview() {
+        try {
+            const count = numberValue('commission_preview_count');
+            const percent = previewPercent(readSettings(), count);
+            if (!Number.isFinite(percent) || percent < 0 || percent > 100) throw new Error('Enter percentages from 0 to 100.');
+            preview.innerHTML = `Preview for ${count} cartelas: <strong>${Math.round(percent * 100) / 100}%</strong> house commission`;
+        } catch (error) {
+            preview.textContent = `Preview unavailable: ${error.message}`;
+        }
+    }
+
+    function applySettings(settings) {
+        const value = settings && typeof settings === 'object' ? settings : defaults;
+        modeSelect.value = ['preset', 'manual', 'auto', 'interval'].includes(value.mode) ? value.mode : 'preset';
+        const preset = value.preset || 'A';
+        document.querySelectorAll('.commission_box').forEach(box => box.classList.toggle('active', box.dataset.commission === preset));
+        document.getElementById('manual_commission_percent').value = value.manualPercent ?? 20;
+        document.getElementById('auto_base_cartelas').value = value.auto?.baseCartelas ?? 1;
+        document.getElementById('auto_base_percent').value = value.auto?.basePercent ?? 20;
+        document.getElementById('auto_increment_percent').value = value.auto?.incrementPercent ?? 1;
+        document.getElementById('interval_fallback_percent').value = value.interval?.fallbackPercent ?? 20;
+        rulesContainer.replaceChildren();
+        const rules = value.interval?.rules?.length ? value.interval.rules : defaults.interval.rules;
+        rules.forEach(addRangeRow);
+        showMode();
+    }
+
+    async function loadCurrentCommission() {
+        try {
+            const resp = await window.api.getShopSetting();
+            applySettings(resp?.success ? resp.settings?.commissionSettings : defaults);
+        } catch (e) {
+            console.warn('Commission load failed:', e);
+            applySettings(defaults);
+        }
+    }
+
+    document.querySelectorAll('.commission_box').forEach(box => {
+        box.addEventListener('click', () => {
+            document.querySelectorAll('.commission_box').forEach(b => b.classList.remove('active'));
+            box.classList.add('active');
+            updatePreview();
+        });
+    });
+    modeSelect.addEventListener('change', showMode);
+    document.getElementById('add_commission_range').addEventListener('click', () => {
+        addRangeRow();
+        updatePreview();
+    });
+    document.querySelectorAll('#commission_box_container input').forEach(input => input.addEventListener('input', updatePreview));
+
+    document.querySelector('.update_commission').addEventListener('click', async () => {
+        try {
+            const r = await window.api.updateCommissionGame(readSettings());
+            if (r.success) {
+                successMsg.textContent = r.message || 'Commission saved locally.';
+                successMsg.style.color = 'green';
+                if (r.settings) applySettings(r.settings);
+            } else {
+                throw new Error(r.message || 'Failed');
+            }
+        } catch (e) {
+            console.error(e);
+            successMsg.textContent = 'Update failed: ' + e.message;
+            successMsg.style.color = 'red';
+        }
+        clearMsg();
+    });
+
+    await loadCurrentCommission();
+});
+</script>
+
+<!-- 6. Daily income -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fmt = d => `${d.getFullYear()}-${('0'+(d.getMonth()+1)).slice(-2)}-${('0'+d.getDate()).slice(-2)}`;
+    const today = fmt(new Date());
+    const fromInput = document.getElementById('from-date');
+    const toInput = document.getElementById('to-date');
+    const income = document.getElementById('daily_income');
+    fromInput.value = today;
+    toInput.value = today;
+
+    const loadIncome = (f, t) => {
+        window.api.getDailyIncome({from_date: f, to_date: t})
+            .then(r => { income.textContent = `${r.status === 'success' ? r.total : 0} ETB`; })
+            .catch(() => { income.textContent = '0 ETB'; });
+    };
+    loadIncome(today, today);
+
+    document.querySelector('.date_search_button').addEventListener('click', () => {
+        const f = fromInput.value;
+        const t = toInput.value;
+        if (!f || !t) { alert('Please select both dates.'); return; }
+        loadIncome(f, t);
+    });
+});
+</script>
+
+<script src="../js/disableActions.js"></script>
+</body>
+</html>

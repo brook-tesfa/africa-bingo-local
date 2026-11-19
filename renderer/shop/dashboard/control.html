@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Africa Bingo Local Dashboard</title>
+  <link rel="shortcut icon" href="../../../img/logo.ico" type="image/x-icon">
+  <style>
+    * { box-sizing: border-box; font-family: Arial, sans-serif; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: radial-gradient(circle at top, #45465b, #141415 60%);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .dashboard { width: min(940px, 100%); text-align: center; }
+    .header img { width: 86px; height: 86px; object-fit: contain; }
+    .header h1 { margin: 8px 0; }
+    .status {
+      display: inline-block;
+      margin-bottom: 30px;
+      padding: 7px 12px;
+      border: 1px solid #5fd888;
+      border-radius: 999px;
+      color: #a9ffc5;
+      background: rgba(18, 70, 38, .35);
+      font-size: .83rem;
+      font-weight: 700;
+    }
+    .actions { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 22px; }
+    .action {
+      min-height: 125px;
+      border: 2px solid rgba(255,255,255,.65);
+      border-radius: 18px;
+      background: linear-gradient(145deg, #7566c5, #443983);
+      color: #fff;
+      font-size: clamp(1.25rem, 3vw, 2rem);
+      font-weight: 750;
+      text-decoration: none;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: transform .18s ease, filter .18s ease;
+    }
+    .action:hover { transform: translateY(-3px); filter: brightness(1.12); }
+    .action.logout { background: linear-gradient(145deg, #934f52, #642b2e); }
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 20px;
+      background: rgba(0,0,0,.72);
+      z-index: 10;
+    }
+    .modal.open { display: grid; }
+    .modal-card {
+      width: min(430px, 100%);
+      padding: 28px;
+      border-radius: 16px;
+      background: #30294f;
+      border: 1px solid rgba(255,255,255,.25);
+      box-shadow: 0 18px 60px rgba(0,0,0,.45);
+      text-align: left;
+    }
+    .modal-card h2 { margin-top: 0; }
+    .balance { color: #c4ffd3; font-size: 1.05rem; }
+    label { display: block; margin: 14px 0 7px; }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 8px;
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      font-size: 1rem;
+    }
+    .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .modal-actions button {
+      flex: 1;
+      padding: 11px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: #6555b3;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .modal-actions .cancel { background: #655d70; }
+    .message { min-height: 22px; margin-bottom: 0; color: #ffd0d0; }
+    .message.success { color: #b7ffca; }
+    textarea, select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 8px;
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      font-size: .95rem;
+    }
+    textarea { min-height: 108px; resize: vertical; font-family: ui-monospace, monospace; }
+    select option { color: #111; }
+    .field-row { display: flex; gap: 8px; }
+    .field-row input { flex: 1; }
+    .field-row button, #copyRoomUrlBtn, #refreshNetworkBtn {
+      flex: 0 0 auto;
+      padding: 9px 14px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: #6555b3;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .settings-button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 9px 14px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: #655d70;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .settings-button[hidden] { display: none; }
+    .hint { color: #d4cfeb; font-size: .84rem; line-height: 1.4; }
+    .wide-card { width: min(720px, 100%); max-height: 92vh; overflow: auto; }
+    .room-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .room-panel { padding: 14px; border-radius: 12px; background: rgba(255,255,255,.07); }
+    .room-panel h3 { margin: 0 0 10px; }
+    .room-line { margin: 6px 0; color: #ddd8f3; overflow-wrap: anywhere; }
+    #roomQr { width: 180px; min-height: 180px; margin: 12px auto; padding: 10px; border-radius: 10px; background: #fff; }
+    #roomQr:empty { display: none; }
+    .client { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
+    .client-name { flex: 1; }
+    .client button { padding: 7px 9px; border: 0; border-radius: 7px; color: #fff; cursor: pointer; }
+    .approve { background: #2f8f55; }
+    .deny { background: #a4484d; }
+    .selected-list { color: #c9ffd7; overflow-wrap: anywhere; }
+    @media (max-width: 650px) { .actions { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .room-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="dashboard">
+    <header class="header">
+      <img src="../../../img/logo.png" alt="Africa Bingo logo">
+      <h1>Africa Bingo Local</h1>
+      <div class="status">PRIVATE MOBILE MODE · INTERNET SERVERS DISABLED</div>
+    </header>
+    <section class="actions">
+      <button id="playGameButton" class="action">Play Game</button>
+      <a class="action" href="../data/data.html">View Data</a>
+      <button id="mobileRoomBtn" class="action">Mobile Cartela Room</button>
+      <button id="creditBtn" class="action">Redeem Credit Voucher</button>
+      <button id="logoutBtn" class="action logout">Logout</button>
+    </section>
+  </main>
+
+  <div id="creditModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="creditTitle">
+    <div class="modal-card">
+      <h2 id="creditTitle">Redeem Signed Credit Voucher</h2>
+      <p id="currentBalance" class="balance">Current balance: loading…</p>
+      <label for="deviceCode">Device code</label>
+      <div class="field-row">
+        <input id="deviceCode" type="text" readonly value="Loading…">
+        <button id="copyDeviceCodeBtn" type="button">Copy</button>
+      </div>
+      <p class="hint">Send this device code to your voucher provider. Only a voucher signed for this computer can add credit.</p>
+      <label for="voucherCode">Voucher code</label>
+      <textarea id="voucherCode" spellcheck="false" autocomplete="off" placeholder="Paste HBV1 or ABV1 voucher code here"></textarea>
+      <div class="modal-actions">
+        <button id="redeemVoucherBtn">Redeem Voucher</button>
+        <button id="cancelCreditBtn" class="cancel">Cancel</button>
+      </div>
+      <p id="creditMessage" class="message" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <div id="mobileRoomModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="mobileRoomTitle">
+    <div class="modal-card wide-card">
+      <h2 id="mobileRoomTitle">Mobile Cartela Room</h2>
+      <p class="hint">Phones connect directly through this computer's hotspot or private LAN. Internet access is not used.</p>
+      <div class="room-grid">
+        <section class="room-panel">
+          <h3>1. Private Hotspot</h3>
+          <p id="hotspotStatus" class="room-line">Checking…</p>
+          <p id="hotspotCredentials" class="room-line"></p>
+          <div class="modal-actions">
+            <button id="startHotspotBtn">Start Hotspot</button>
+            <button id="stopHotspotBtn" class="cancel">Stop</button>
+          </div>
+          <button id="openHotspotSettingsBtn" type="button" class="settings-button">Open Windows Hotspot Settings</button>
+          <label for="networkAddress">Network address</label>
+          <select id="networkAddress"><option value="auto">Automatic</option></select>
+          <button id="refreshNetworkBtn" type="button" style="margin-top:10px">Refresh addresses</button>
+        </section>
+        <section class="room-panel">
+          <h3>2. Cartela Room</h3>
+          <p id="roomStatus" class="room-line">Room stopped</p>
+          <div class="modal-actions">
+            <button id="startRoomBtn">Start Room</button>
+            <button id="stopRoomBtn" class="cancel">Stop</button>
+          </div>
+          <div id="roomQr"></div>
+          <p id="roomUrl" class="room-line"></p>
+          <button id="copyRoomUrlBtn" type="button">Copy player link</button>
+        </section>
+      </div>
+      <section class="room-panel" style="margin-top:14px">
+        <h3>Selected Cartelas</h3>
+        <p id="mobileSelectedCards" class="selected-list">None</p>
+        <h3>Connected Phones</h3>
+        <div id="mobileClients"><p class="room-line">No phones connected.</p></div>
+      </section>
+      <p id="mobileRoomMessage" class="message" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="closeMobileRoomBtn" class="cancel">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../vendor/qrcode.min.js"></script>
+  <script src="./dashboard.js"></script>
+  <script src="./local-credit.js"></script>
+  <script src="./mobile-room-control.js"></script>
+</body>
+</html>

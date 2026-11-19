@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Activate Africa Bingo</title>
+  <link rel="shortcut icon" href="../img/logo.ico" type="image/x-icon">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { min-height:100vh; margin:0; display:grid; place-items:center; padding:24px; font-family:"Segoe UI",Tahoma,sans-serif; color:#fff; background:linear-gradient(135deg,#f071d0,#6f56e8 55%,#24106f); }
+    .card { width:min(520px,100%); padding:30px; border:1px solid rgba(255,255,255,.28); border-radius:22px; background:rgba(15,13,45,.82); box-shadow:0 24px 70px rgba(0,0,0,.35); }
+    .brand { text-align:center; }
+    .brand img { width:80px; height:80px; object-fit:contain; }
+    h1 { margin:8px 0; }
+    .subtitle,.note { color:#ddd8ff; line-height:1.45; }
+    label { display:block; margin:16px 0 7px; font-weight:700; }
+    input,textarea { width:100%; padding:12px; border:1px solid rgba(255,255,255,.4); border-radius:9px; background:rgba(255,255,255,.1); color:#fff; font:inherit; }
+    #deviceCode { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; text-align:center; letter-spacing:.5px; }
+    textarea { min-height:105px; resize:vertical; word-break:break-all; }
+    button { width:100%; margin-top:12px; padding:12px; border:1px solid rgba(255,255,255,.75); border-radius:999px; color:#fff; background:linear-gradient(90deg,#d215a3,#3015b8); font-size:16px; font-weight:750; cursor:pointer; }
+    button.secondary { background:transparent; }
+    button:disabled { opacity:.55; cursor:wait; }
+    #message { min-height:24px; margin:14px 0 0; text-align:center; font-weight:650; }
+    .error { color:#ffd1d1; }
+    .success { color:#b9ffd0; }
+    .security { margin-top:10px; padding:10px; border-left:4px solid #b9ffd0; background:rgba(0,0,0,.2); font-size:.88rem; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <img src="../img/logo.png" alt="Africa Bingo logo">
+      <h1>Activate Africa Bingo</h1>
+      <p class="subtitle">This one-time offline activation locks this installation to the current computer.</p>
+    </div>
+
+    <label for="bingoName">Bingo or shop name</label>
+    <input id="bingoName" maxlength="40" placeholder="Example: Africa Bingo" autocomplete="off">
+
+    <label for="deviceCode">Device Code</label>
+    <input id="deviceCode" readonly value="Loading...">
+    <div class="security">No internet is used. Copy the request, send it to the license owner, and paste the signed activation code returned to you.</div>
+
+    <button id="copyRequest" type="button" class="secondary">Copy Activation Request</button>
+
+    <label for="activationCode">Activation Code</label>
+    <textarea id="activationCode" placeholder="Paste the HB1 activation code here" spellcheck="false"></textarea>
+    <button id="activateButton" type="button">Activate This Device</button>
+    <p id="message" aria-live="polite"></p>
+    <p class="note">Copying the application or its data to another computer will not copy the hardware authorization.</p>
+  </main>
+
+  <script>
+    let deviceCode = '';
+    const message = document.getElementById('message');
+
+    function showMessage(text, success = false) {
+      message.textContent = text;
+      message.className = success ? 'success' : 'error';
+    }
+
+    function activationRequest() {
+      const bingoName = document.getElementById('bingoName').value.trim();
+      if (!bingoName) throw new Error('Enter the Bingo or shop name first.');
+      if (!deviceCode) throw new Error('The Device Code is unavailable.');
+      return ['HomeMade Bingo Activation Request', '', `Bingo Name: ${bingoName}`, `Device Code: ${deviceCode}`].join('\n');
+    }
+
+    document.getElementById('copyRequest').addEventListener('click', async () => {
+      try {
+        const result = await window.api.copyLocalText(activationRequest());
+        if (!result?.success) throw new Error(result?.message || 'Copy failed.');
+        showMessage('Activation request copied. Send it to the license owner.', true);
+      } catch (error) {
+        showMessage(error.message);
+      }
+    });
+
+    document.getElementById('activateButton').addEventListener('click', async () => {
+      const button = document.getElementById('activateButton');
+      const code = document.getElementById('activationCode').value.trim();
+      if (!code) return showMessage('Paste the activation code first.');
+      button.disabled = true;
+      try {
+        const result = await window.api.activateDevice(code);
+        if (!result?.success) throw new Error(result?.message || 'Activation failed.');
+        showMessage(`Activated for ${result.license.bingoName}.`, true);
+        await window.api.completeDeviceActivation();
+      } catch (error) {
+        showMessage(error.message || 'Activation failed.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    window.api.getDeviceActivationStatus().then(result => {
+      deviceCode = result?.device_code || '';
+      document.getElementById('deviceCode').value = deviceCode || 'Unavailable';
+      if (result?.message && result.reason !== 'NOT_ACTIVATED') showMessage(result.message);
+    }).catch(error => showMessage(error.message || 'Could not read the Device Code.'));
+  </script>
+</body>
+</html>

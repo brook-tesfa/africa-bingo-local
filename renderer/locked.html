@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="am">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; media-src 'self' data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Locked — Africa Bingo</title>
+
+    <!-- Favicon -->
+    <link rel="shortcut icon" href="../img/logo.ico" type="image/x-icon">
+    <link rel="icon" href="../img/logo.png" type="image/png">
+    <link rel="apple-touch-icon" href="../img/logo.png">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(circle at center, #2a0000 0%, #0a0000 70%, #000 100%);
+            color: #fff;
+            cursor: none; /* Hide cursor to prevent interaction feel */
+        }
+
+        /* Subtle animated background */
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background:
+                repeating-linear-gradient(
+                    45deg,
+                    rgba(255, 0, 0, 0.03) 0px,
+                    rgba(255, 0, 0, 0.03) 2px,
+                    transparent 2px,
+                    transparent 20px
+                );
+            pointer-events: none;
+            animation: shift 20s linear infinite;
+        }
+
+        @keyframes shift {
+            0%   { background-position: 0 0; }
+            100% { background-position: 200px 200px; }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .warning-icon {
+            width: 140px;
+            height: 140px;
+            margin-bottom: 30px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .warning-icon svg {
+            width: 100%;
+            height: 100%;
+            fill: #ff2e2e;
+            filter: drop-shadow(0 0 20px rgba(255, 46, 46, 0.8));
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50%      { transform: scale(1.08); opacity: 0.85; }
+        }
+
+        h1 {
+            font-size: 2.4rem;
+            font-weight: 900;
+            color: #ff2e2e;
+            text-shadow: 0 0 20px rgba(255, 46, 46, 0.6);
+            margin-bottom: 15px;
+            letter-spacing: 1px;
+        }
+
+        h2 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #ffb3b3;
+            margin-bottom: 30px;
+        }
+
+        .message-box {
+            max-width: 700px;
+            background: rgba(255, 46, 46, 0.08);
+            border: 2px solid rgba(255, 46, 46, 0.4);
+            border-radius: 14px;
+            padding: 25px 35px;
+            margin-bottom: 35px;
+            box-shadow: 0 0 40px rgba(255, 46, 46, 0.15) inset;
+        }
+
+        .message-box p {
+            font-size: 1.15rem;
+            line-height: 1.7;
+            color: #ffd9d9;
+            margin-bottom: 12px;
+        }
+
+        .message-box p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-box .en {
+            font-size: 1rem;
+            color: #ffb3b3;
+            font-style: italic;
+        }
+
+        .countdown-box {
+            margin-bottom: 30px;
+            font-size: 1.2rem;
+            color: #ff9999;
+        }
+
+        .countdown-box span {
+            font-weight: 900;
+            color: #ff2e2e;
+            font-size: 1.6rem;
+            display: inline-block;
+            min-width: 50px;
+        }
+
+        .quit-btn {
+            padding: 14px 40px;
+            background: #ff2e2e;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: 0 6px 20px rgba(255, 46, 46, 0.4);
+        }
+
+        .quit-btn:hover {
+            background: #ff5555;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 28px rgba(255, 46, 46, 0.6);
+        }
+
+        .quit-btn:active {
+            transform: translateY(0);
+            background: #cc1f1f;
+        }
+
+        .footer-note {
+            position: fixed;
+            bottom: 20px;
+            font-size: 0.85rem;
+            color: #7a4040;
+            letter-spacing: 0.5px;
+        }
+
+        /* Blinking dot */
+        .blink-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #ff2e2e;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.2; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+
+        <!-- Warning icon -->
+        <div class="warning-icon">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L1 21h22L12 2zm0 4.5l7.5 13h-15L12 6.5zm-1 4.5h2v5h-2v-5zm0 6h2v2h-2v-2z"/>
+            </svg>
+        </div>
+
+        <!-- Title -->
+        <h1>🔒 SYSTEM LOCKED</h1>
+        <h2>እባክዎ Developer Tools አይክፈቱ</h2>
+
+        <!-- Message -->
+        <div class="message-box">
+            <p>
+                የዚህ ስርዓት ደህንነት ተጥሷል። እባክዎ መተግበሪያውን እንደገና ይጀምሩ።
+            </p>
+            <p class="en">
+                The security of this system has been compromised.
+                Developer Tools are strictly prohibited.
+                This action has been logged and reported.
+            </p>
+            <p class="en">
+                Please restart the application. If this problem persists,
+                contact your system administrator.
+            </p>
+        </div>
+
+        <!-- Countdown -->
+        <div class="countdown-box">
+            <span class="blink-dot"></span>
+            Application will close in
+            <span id="countdown">30</span>
+            seconds
+        </div>
+
+        <!-- Quit button -->
+        <button class="quit-btn" id="quitButton">
+            CLOSE APPLICATION NOW
+        </button>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-note">
+        Africa Bingo Offline &nbsp;•&nbsp; Security Lock
+    </div>
+
+    <script>
+        // ============================================================
+        // LOCKED PAGE — ESCAPE PREVENTION SCRIPT
+        // ============================================================
+
+        // ---------- 1. Block ALL keyboard shortcuts ----------
+        document.addEventListener('keydown', (e) => {
+            // Block everything except the quit button (Tab + Enter)
+            const allowed = ['Tab', 'Enter'];
+            if (allowed.includes(e.key)) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }, true);
+
+        document.addEventListener('keyup', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }, true);
+
+        document.addEventListener('keypress', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }, true);
+
+        // ---------- 2. Block right-click ----------
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            return false;
+        });
+
+        // ---------- 3. Block mouse wheel / drag ----------
+        document.addEventListener('wheel', (e) => {
+            e.preventDefault();
+        }, { passive: false });
+
+        document.addEventListener('dragstart', (e) => e.preventDefault());
+
+        // ---------- 4. Block text selection / copy ----------
+        document.addEventListener('selectstart', (e) => e.preventDefault());
+        document.addEventListener('copy', (e) => e.preventDefault());
+        document.addEventListener('cut', (e) => e.preventDefault());
+
+        // ---------- 5. Block beforeunload navigation ----------
+        window.addEventListener('beforeunload', (e) => {
+            e.preventDefault();
+            e.returnValue = '';
+        });
+
+        // ---------- 6. Lock scroll ----------
+        window.addEventListener('scroll', () => {
+            window.scrollTo(0, 0);
+        });
+
+        // ---------- 7. Prevent focus loss from DevTools ----------
+        // Some DevTools detection methods rely on blur/focus events.
+        // We don't want the page to react to those.
+        window.addEventListener('blur', () => {
+            // No-op — we are already locked.
+        });
+
+        // ---------- 8. Quit button ----------
+        const quitButton = document.getElementById('quitButton');
+        quitButton.addEventListener('click', () => {
+            if (window.api && window.api.quitApp) {
+                window.api.quitApp();
+            } else {
+                // Fallback if preload not loaded (shouldn't happen)
+                window.close();
+            }
+        });
+
+        // Allow Enter key to activate the quit button (for accessibility)
+        quitButton.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                quitButton.click();
+            }
+        });
+
+        // ---------- 9. Countdown auto-quit ----------
+        let secondsLeft = 30;
+        const countdownEl = document.getElementById('countdown');
+
+        const countdownTimer = setInterval(() => {
+            secondsLeft--;
+            if (countdownEl) countdownEl.textContent = secondsLeft;
+
+            if (secondsLeft <= 0) {
+                clearInterval(countdownTimer);
+                if (window.api && window.api.quitApp) {
+                    window.api.quitApp();
+                } else {
+                    window.close();
+                }
+            }
+        }, 1000);
+
+        // ---------- 10. Focus the quit button immediately ----------
+        window.addEventListener('load', () => {
+            quitButton.focus();
+        });
+
+        // ---------- 11. Block DevTools opening attempt on this page too ----------
+        // Just in case someone tries to open DevTools from the locked page,
+        // we re-trigger the main-process lock (which is already locked, so no-op).
+        if (window.api && window.api.startDevToolsDetection) {
+            try {
+                window.api.startDevToolsDetection();
+            } catch (err) {
+                // Ignore — already locked
+            }
+        }
+
+        // ---------- 12. Prevent the cursor from interacting ----------
+        // (cursor: none in CSS handles this, but also block pointer events on body)
+        document.body.addEventListener('pointerdown', (e) => {
+            // Only allow the quit button
+            if (e.target.id !== 'quitButton' && !e.target.closest('#quitButton')) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+
+        console.log('🔒 Locked page active. All escape routes disabled.');
+    </script>
+
+</body>
+</html>
