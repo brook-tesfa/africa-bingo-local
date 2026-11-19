@@ -64,6 +64,7 @@ class CallbackDatabase {
 
 const ipcHandlers = new Map();
 const ipcListeners = new Map();
+const appListeners = new Map();
 const windows = [];
 let remoteRequestGuard = null;
 let permissionRequestHandler = null;
@@ -96,7 +97,11 @@ const electronMock = {
     setPath() {},
     getPath: () => testRoot,
     whenReady: () => Promise.resolve(),
-    on() {},
+    on(event, listener) {
+      const listeners = appListeners.get(event) || [];
+      listeners.push(listener);
+      appListeners.set(event, listeners);
+    },
     quit() {}
   },
   BrowserWindow: MockBrowserWindow,
@@ -279,6 +284,10 @@ async function main() {
   const loggedOut = await ipcHandlers.get('perform-logout')();
   assert.equal(loggedOut.success, true);
   assert.equal((await ipcHandlers.get('check-session')()).active, false);
+
+  for (const listener of appListeners.get('window-all-closed') || []) {
+    await listener();
+  }
 
   console.log('local flow passed (account, login, custom commission, signed voucher, replay block, sale, logout, network deny)');
 }
