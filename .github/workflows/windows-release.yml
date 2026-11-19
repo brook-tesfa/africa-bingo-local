@@ -31,13 +31,6 @@ jobs:
       - name: Build Windows installer
         run: npm run dist:win
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Africa-Bingo-Local-Windows-x64
-          path: dist/*.exe
-          if-no-files-found: error
-
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
