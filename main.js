@@ -3,11 +3,14 @@ const path = require('path');
 const { fileURLToPath } = require('node:url');
 const fs = require('fs');
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const NETWORK_DISABLED_CODE = 'ERR_AFRICA_BINGO_NETWORK_DISABLED';
 const userDataRoot = app.getPath('userData');
 const legacyPortableRoot = path.join(path.dirname(process.execPath), 'africa-bingo-local-data');
 const startupLogPath = path.join(userDataRoot, 'logs', 'startup.log');
+const startupSmokeTest = process.argv.includes('--smoke-test');
+const MAX_STARTUP_LOG_BYTES = 1024 * 1024;
 
 function errorDetails(error) {
   if (error instanceof Error) return error.stack || error.message;
@@ -17,6 +20,10 @@ function errorDetails(error) {
 function writeStartupLog(level, message) {
   try {
     fs.mkdirSync(path.dirname(startupLogPath), { recursive: true });
+    if (fs.existsSync(startupLogPath) && fs.statSync(startupLogPath).size > MAX_STARTUP_LOG_BYTES) {
+      fs.rmSync(`${startupLogPath}.previous`, { force: true });
+      fs.renameSync(startupLogPath, `${startupLogPath}.previous`);
+    }
     fs.appendFileSync(
       startupLogPath,
       `[${new Date().toISOString()}] ${level}: ${message}\n`,
@@ -31,6 +38,8 @@ function reportStartupFailure(context, error) {
   const details = errorDetails(error);
   writeStartupLog('FATAL', `${context}\n${details}`);
   console.error(context, details);
+  process.exitCode = 1;
+  if (startupSmokeTest) return;
   try {
     dialog.showErrorBox(
       'Africa Bingo Local could not start',
@@ -52,12 +61,19 @@ function migrateLegacyPortableData() {
     const source = path.join(legacyPortableRoot, entry);
     const destination = path.join(userDataRoot, entry);
     if (!fs.existsSync(source) || fs.existsSync(destination)) continue;
-    fs.cpSync(source, destination, {
-      recursive: true,
-      force: false,
-      errorOnExist: true
-    });
-    migrated.push(entry);
+    const temporary = `${destination}.migration-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.cpSync(source, temporary, {
+        recursive: true,
+        force: false,
+        errorOnExist: true
+      });
+      fs.renameSync(temporary, destination);
+      migrated.push(entry);
+    } catch (error) {
+      fs.rmSync(temporary, { recursive: true, force: true });
+      writeStartupLog('ERROR', `Could not migrate legacy ${entry}: ${errorDetails(error)}`);
+    }
   }
 
   if (migrated.length) {
@@ -69,6 +85,20 @@ writeStartupLog(
   'INFO',
   `Starting Africa Bingo Local (packaged=${app.isPackaged}, userData=${userDataRoot})`
 );
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock?.() ?? true;
+if (!hasSingleInstanceLock) {
+  writeStartupLog('INFO', 'A second application instance was closed.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const [window] = BrowserWindow.getAllWindows();
+    if (!window) return;
+    if (window.isMinimized?.()) window.restore();
+    window.show();
+    window.focus();
+  });
+}
 
 function networkDisabledError() {
   const error = new Error('Africa Bingo Local does not permit network access.');
@@ -172,6 +202,9 @@ let latestMobileRoomDesktopState = {
 };
 
 let db;
+let databaseClosePromise = null;
+let shutdownPromise = null;
+let allowImmediateQuit = false;
 
 // ⭐ Balance reconciler interval handle
 let reconcileIntervalId = null;
@@ -324,8 +357,24 @@ const ACTIVATION_PAGE = path.join(__dirname, 'renderer', 'activation.html');
 // CREATE TABLES (with obfuscated names and columns)
 // ============================================================
 function createTables(database) {
-  database.serialize(() => {
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.session} (
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const runSchema = sql => database.run(sql, error => {
+      if (error) fail(error);
+    });
+
+    database.configure?.('busyTimeout', 5000);
+    database.serialize(() => {
+    runSchema('PRAGMA foreign_keys = ON;');
+    runSchema('PRAGMA busy_timeout = 5000;');
+    runSchema('PRAGMA journal_mode = WAL;');
+
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.session} (
       ${C.session.user_id} INTEGER,
       ${C.session.username} TEXT,
       ${C.session.shop_id} INTEGER,
@@ -333,7 +382,7 @@ function createTables(database) {
       ${C.session.active} INTEGER DEFAULT 1
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.sales} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.sales} (
       ${C.sales.sales_id} INTEGER PRIMARY KEY AUTOINCREMENT,
       ${C.sales.shop_id} INTEGER,
       ${C.sales.user_id} INTEGER,
@@ -349,7 +398,7 @@ function createTables(database) {
       ${C.sales.synced} INTEGER DEFAULT 0
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.shop_message} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.shop_message} (
       ${C.shop_message.id} INTEGER PRIMARY KEY AUTOINCREMENT,
       ${C.shop_message.shop_id} INTEGER NOT NULL,
       ${C.shop_message.message} TEXT,
@@ -357,7 +406,7 @@ function createTables(database) {
       ${C.shop_message.seen} INTEGER DEFAULT 0
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.shops} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.shops} (
       ${C.shops.shop_id} INTEGER PRIMARY KEY,
       ${C.shops.shop_name} TEXT NOT NULL UNIQUE,
       ${C.shops.shop_address} TEXT,
@@ -383,7 +432,7 @@ function createTables(database) {
       ${C.shops.agent_id} INTEGER
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.deposits} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.deposits} (
       ${C.deposits.deposit_id} INTEGER PRIMARY KEY,
       ${C.deposits.shop_id} INTEGER NOT NULL,
       ${C.deposits.deposit_amount} TEXT NOT NULL,
@@ -392,13 +441,13 @@ function createTables(database) {
       ${C.deposits.date_of_deposit} TEXT NOT NULL
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.credentials} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.credentials} (
       ${C.credentials.username} TEXT PRIMARY KEY,
       ${C.credentials.password} TEXT,
       ${C.credentials.last_login} TEXT
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.local_accounts} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.local_accounts} (
       ${C.local_accounts.user_id} INTEGER PRIMARY KEY AUTOINCREMENT,
       ${C.local_accounts.username} TEXT NOT NULL UNIQUE COLLATE NOCASE,
       ${C.local_accounts.password_hash} TEXT NOT NULL,
@@ -407,7 +456,7 @@ function createTables(database) {
       ${C.local_accounts.created_at} TEXT NOT NULL DEFAULT (datetime('now'))
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.voucher_redemptions} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.voucher_redemptions} (
       ${C.voucher_redemptions.voucher_id} TEXT PRIMARY KEY,
       ${C.voucher_redemptions.shop_id} INTEGER NOT NULL,
       ${C.voucher_redemptions.device_code} TEXT NOT NULL,
@@ -420,25 +469,40 @@ function createTables(database) {
       ${C.voucher_redemptions.redeemed_at} TEXT NOT NULL
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.shop_settings} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.shop_settings} (
       ${C.shop_settings.shop_id} INTEGER PRIMARY KEY,
       ${C.shop_settings.game_time_gap} TEXT DEFAULT '5000',
       ${C.shop_settings.voices_game} TEXT DEFAULT 'A',
       ${C.shop_settings.commission_game} TEXT DEFAULT 'A'
     );`);
 
-    database.run(`CREATE TABLE IF NOT EXISTS ${T.sync_log} (
+    runSchema(`CREATE TABLE IF NOT EXISTS ${T.sync_log} (
       ${C.sync_log.sync_key} TEXT PRIMARY KEY,
       ${C.sync_log.last_deposit_date} TEXT DEFAULT '1970-01-01 00:00:00'
     );`);
 
     // Retained only for compatibility with databases created by earlier releases.
-    database.run(`CREATE TABLE IF NOT EXISTS ZX (
+    runSchema(`CREATE TABLE IF NOT EXISTS ZX (
       z1 TEXT PRIMARY KEY,
       z2 TEXT
     );`);
 
-    console.log('✅ All required tables verified.');
+    database.get('PRAGMA quick_check;', (error, row) => {
+      if (error) {
+        fail(error);
+        return;
+      }
+      const result = row?.quick_check || Object.values(row || {})[0];
+      if (String(result).toLowerCase() !== 'ok') {
+        fail(new Error(`SQLite integrity check failed: ${result || 'unknown result'}`));
+        return;
+      }
+      if (settled) return;
+      settled = true;
+      console.log('✅ All required tables and SQLite integrity verified.');
+      resolve();
+    });
+    });
   });
 }
 
@@ -462,6 +526,13 @@ function nowSql() {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function isIsoCalendarDate(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
 }
 
 const securedWebContents = new WeakSet();
@@ -522,6 +593,7 @@ async function reconcileBalance(shopId) {
             return { success: false, message: 'No shopId provided' };
         }
 
+        return await withImmediateTransaction(async () => {
         const depositsRows = await allAsync(
             `SELECT ${C.deposits.deposit_amount} AS amt FROM ${T.deposits} WHERE ${C.deposits.shop_id} = ?`,
             [shopId]
@@ -579,6 +651,7 @@ async function reconcileBalance(shopId) {
                 totalCommissions
             };
         }
+        });
     } catch (err) {
         console.error("🔄 Balance reconcile error:", err);
         return { success: false, message: err.message };
@@ -704,11 +777,14 @@ ipcMain.handle('create-local-account', async (_event, input = {}) => {
   if (!/^[\p{L}\p{N}_.-]{3,50}$/u.test(username)) {
     return { success: false, message: 'Username must be 3-50 letters, numbers, dots, dashes, or underscores.' };
   }
-  if (password.length < 6) {
-    return { success: false, message: 'Password must be at least 6 characters.' };
+  if (password.length < 6 || password.length > 256) {
+    return { success: false, message: 'Password must be between 6 and 256 characters.' };
   }
   if (!shopName || shopName.length > 80) {
     return { success: false, message: 'Shop name is required and must be at most 80 characters.' };
+  }
+  if (shopAddress.length > 200) {
+    return { success: false, message: 'Shop address must be at most 200 characters.' };
   }
   try {
     const duplicate = await getAsync(
@@ -718,6 +794,13 @@ ipcMain.handle('create-local-account', async (_event, input = {}) => {
     if (duplicate) return { success: false, message: 'That username already exists.' };
 
     const { salt, hash } = await hashPassword(password);
+    return await withImmediateTransaction(async () => {
+    const duplicateInTransaction = await getAsync(
+      `SELECT ${C.local_accounts.user_id} AS user_id FROM ${T.local_accounts} WHERE ${C.local_accounts.username} = ? COLLATE NOCASE`,
+      [username]
+    );
+    if (duplicateInTransaction) throw new Error('That username already exists.');
+
     const accountCount = await getAsync(`SELECT COUNT(*) AS count FROM ${T.local_accounts}`);
     const legacyShop = Number(accountCount?.count || 0) === 0
       ? await getAsync(`
@@ -730,8 +813,6 @@ ipcMain.handle('create-local-account', async (_event, input = {}) => {
     const shopId = Number(legacyShop?.shop_id || nextShop?.next_id || 1);
     const balanceBeforeCredit = legacyShop ? decNum('shops', legacyShop.balance) : 0;
     const balanceAfterCredit = balanceBeforeCredit + initialCredit;
-    await runAsync('BEGIN IMMEDIATE TRANSACTION');
-
     const shopValues = [
       shopId,
       encryptValue('shops', shopName),
@@ -817,7 +898,6 @@ ipcMain.handle('create-local-account', async (_event, input = {}) => {
       encryptValue('shop_settings', 'A')
     ]);
 
-    await runAsync('COMMIT');
     return {
       success: true,
       user_id: accountResult.lastID,
@@ -826,16 +906,21 @@ ipcMain.handle('create-local-account', async (_event, input = {}) => {
       redirect: 'shop/dashboard/control.html',
       message: 'Local account created and signed in.'
     };
+    });
   } catch (err) {
-    await runAsync('ROLLBACK').catch(() => {});
     console.error('create-local-account error:', err);
     return { success: false, message: err.message };
   }
 });
 
 // Login handler
-ipcMain.handle('perform-login', async (event, username, password) => {
+ipcMain.handle('perform-login', async (_event, username, password) => {
   try {
+    const normalizedUsername = String(username || '').trim();
+    const normalizedPassword = String(password || '');
+    if (normalizedUsername.length > 50 || normalizedPassword.length > 256) {
+      return { success: false, message: 'Incorrect local username or password.' };
+    }
     const account = await getAsync(`
       SELECT ${C.local_accounts.user_id} AS user_id,
              ${C.local_accounts.username} AS username,
@@ -845,9 +930,9 @@ ipcMain.handle('perform-login', async (event, username, password) => {
       FROM ${T.local_accounts}
       WHERE ${C.local_accounts.username} = ? COLLATE NOCASE
       LIMIT 1
-    `, [String(username || '').trim()]);
+    `, [normalizedUsername]);
 
-    if (!account || !(await verifyPassword(password, account.password_salt, account.password_hash))) {
+    if (!account || !(await verifyPassword(normalizedPassword, account.password_salt, account.password_hash))) {
       return { success: false, message: 'Incorrect local username or password.' };
     }
 
@@ -857,48 +942,45 @@ ipcMain.handle('perform-login', async (event, username, password) => {
     );
     if (!shop) return { success: false, message: 'This local account has no shop record.' };
 
-    await runAsync('BEGIN IMMEDIATE TRANSACTION');
-    await runAsync(`UPDATE ${T.session} SET ${C.session.active} = 0`);
-    await runAsync(`
-      INSERT INTO ${T.session} (
-        ${C.session.user_id}, ${C.session.username}, ${C.session.shop_id},
-        ${C.session.user_type}, ${C.session.active}
-      ) VALUES (?, ?, ?, ?, 1)
-    `, [
-      account.user_id,
-      encryptValue('session', account.username),
-      account.shop_id,
-      encryptValue('session', 'shop_user')
-    ]);
-    await runAsync('COMMIT');
+    await withImmediateTransaction(async () => {
+      await runAsync(`UPDATE ${T.session} SET ${C.session.active} = 0`);
+      await runAsync(`
+        INSERT INTO ${T.session} (
+          ${C.session.user_id}, ${C.session.username}, ${C.session.shop_id},
+          ${C.session.user_type}, ${C.session.active}
+        ) VALUES (?, ?, ?, ?, 1)
+      `, [
+        account.user_id,
+        encryptValue('session', account.username),
+        account.shop_id,
+        encryptValue('session', 'shop_user')
+      ]);
+    });
     return { success: true, local_only: true, redirect: 'shop/dashboard/control.html' };
   } catch (err) {
-    await runAsync('ROLLBACK').catch(() => {});
     console.error('Local login error:', err);
     return { success: false, message: err.message };
   }
 });
 
 // Check session
-ipcMain.handle('check-session', () => {
-  return new Promise((resolve) => {
-    db.get(
-      `SELECT * FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`,
-      (err, row) => {
-        if (err) return resolve({ active: false, error: err.message });
-        if (!row) return resolve({ active: false, session: null });
-
-        const session = {
-          user_id: row[C.session.user_id],
-          username: decryptValue('session', row[C.session.username]),
-          shop_id: row[C.session.shop_id],
-          user_type: decryptValue('session', row[C.session.user_type]),
-          active: row[C.session.active]
-        };
-        resolve({ active: true, session });
+ipcMain.handle('check-session', async () => {
+  try {
+    const row = await getAsync(`SELECT * FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`);
+    if (!row) return { active: false, session: null };
+    return {
+      active: true,
+      session: {
+        user_id: row[C.session.user_id],
+        username: decryptValue('session', row[C.session.username]),
+        shop_id: row[C.session.shop_id],
+        user_type: decryptValue('session', row[C.session.user_type]),
+        active: row[C.session.active]
       }
-    );
-  });
+    };
+  } catch (error) {
+    return { active: false, error: error.message };
+  }
 });
 
 // Logout
@@ -915,20 +997,19 @@ ipcMain.handle('perform-logout', async () => {
 });
 
 // Get shop settings
-ipcMain.handle('get-shop-settings', () => {
-  return new Promise((resolve) => {
-    db.get(`
+ipcMain.handle('get-shop-settings', async () => {
+  try {
+    const row = await getAsync(`
       SELECT * FROM ${T.shops}
       WHERE ${C.shops.shop_id} = (
         SELECT ${C.session.shop_id} FROM ${T.session}
         WHERE ${C.session.active} = 1 LIMIT 1
       )
       LIMIT 1
-    `, (err, row) => {
-      if (err) return resolve({ success: false, message: err.message });
-      if (!row) return resolve({ success: false, message: "No shop data found." });
+    `);
+    if (!row) return { success: false, message: "No shop data found." };
 
-      const settings = {
+    const settings = {
         shop_id: row[C.shops.shop_id],
         shop_name: decryptValue('shops', row[C.shops.shop_name]),
         shop_address: decryptValue('shops', row[C.shops.shop_address]),
@@ -952,38 +1033,75 @@ ipcMain.handle('get-shop-settings', () => {
         rules: decInt('shops', row[C.shops.rules]),
         phone_show: decryptValue('shops', row[C.shops.phone_show]),
         agent_id: row[C.shops.agent_id]
-      };
-      resolve({ success: true, settings });
-    });
-  });
+    };
+    return { success: true, settings };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
 });
 
-// Utility to wrap sqlite3 calls as Promises
+// The queue prevents an ordinary query from accidentally running inside a
+// different handler's transaction on sqlite3's shared connection.
+const transactionContext = new AsyncLocalStorage();
+let databaseQueue = Promise.resolve();
+
+function enqueueDatabaseOperation(operation) {
+  if (transactionContext.getStore()) return operation();
+  const result = databaseQueue.then(operation);
+  databaseQueue = result.catch(() => {});
+  return result;
+}
+
 function runAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return enqueueDatabaseOperation(() => new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve(this);
     });
-  });
+  }));
 }
 
 function getAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return enqueueDatabaseOperation(() => new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
       if (err) reject(err);
       else resolve(row);
     });
-  });
+  }));
 }
 
 function allAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
+  return enqueueDatabaseOperation(() => new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
       if (err) reject(err);
       else resolve(rows);
     });
+  }));
+}
+
+function withImmediateTransaction(operation) {
+  const execute = () => transactionContext.run(true, async () => {
+    let transactionActive = false;
+    try {
+      await runAsync('BEGIN IMMEDIATE TRANSACTION');
+      transactionActive = true;
+      const result = await operation();
+      await runAsync('COMMIT');
+      transactionActive = false;
+      return result;
+    } catch (error) {
+      if (transactionActive) {
+        await runAsync('ROLLBACK').catch(rollbackError => {
+          writeStartupLog('ERROR', `SQLite rollback failed: ${errorDetails(rollbackError)}`);
+        });
+      }
+      throw error;
+    }
   });
+
+  const result = databaseQueue.then(execute);
+  databaseQueue = result.catch(() => {});
+  return result;
 }
 
 function sendToAllRenderers(channel, payload) {
@@ -1061,8 +1179,7 @@ ipcMain.handle('redeem-credit-voucher', async (_event, voucherCode) => {
     );
     if (!active?.shop_id) return { success: false, message: 'No active local account.' };
 
-    await runAsync('BEGIN IMMEDIATE TRANSACTION');
-
+    return await withImmediateTransaction(async () => {
     const duplicate = await getAsync(`
       SELECT ${C.voucher_redemptions.voucher_id} AS voucher_id
       FROM ${T.voucher_redemptions}
@@ -1120,7 +1237,6 @@ ipcMain.handle('redeem-credit-voucher', async (_event, voucherCode) => {
       redeemedAt
     ]);
 
-    await runAsync('COMMIT');
     return {
       success: true,
       voucher_id: voucher.voucherId,
@@ -1128,8 +1244,8 @@ ipcMain.handle('redeem-credit-voucher', async (_event, voucherCode) => {
       balance: after,
       message: 'Voucher redeemed successfully.'
     };
+    });
   } catch (error) {
-    await runAsync('ROLLBACK').catch(() => {});
     return { success: false, message: error.message };
   }
 });
@@ -1255,158 +1371,144 @@ ipcMain.handle('private-network-open-settings', async () => {
 });
 
 ipcMain.handle('check-balance', async () => {
-  const active = await getAsync(
-    `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
-  );
-  if (!active?.shop_id) return { status: 'error', message: 'No active local account.' };
-  const shop = await getAsync(
-    `SELECT ${C.shops.current_balance} AS balance FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-    [active.shop_id]
-  );
-  if (!shop) return { status: 'error', message: 'Local shop record not found.' };
-  return { status: 'success', balance: decNum('shops', shop.balance), local_only: true };
+  try {
+    const active = await getAsync(
+      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
+    );
+    if (!active?.shop_id) return { status: 'error', message: 'No active local account.' };
+    const shop = await getAsync(
+      `SELECT ${C.shops.current_balance} AS balance FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
+      [active.shop_id]
+    );
+    if (!shop) return { status: 'error', message: 'Local shop record not found.' };
+    return { status: 'success', balance: decNum('shops', shop.balance), local_only: true };
+  } catch (error) {
+    return { status: 'error', message: error.message || 'Could not read the local balance.' };
+  }
 });
 
 // Handle register-sales event
-ipcMain.handle('register-sales', async (event, data) => {
-  const { no_cards, price, collected, commission } = data;
-
+ipcMain.handle('register-sales', async (_event, data = {}) => {
   try {
-    const session = await getAsync(
-      `SELECT * FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
-    );
-    const sessionUserType = session ? decryptValue('session', session[C.session.user_type]) : null;
+    const noCards = Number(data.no_cards);
+    const price = Number(data.price);
+    const collected = Number(data.collected);
+    const commission = Number(data.commission);
 
-    if (!session || !session[C.session.user_id] || !session[C.session.shop_id] || sessionUserType !== 'shop_user') {
-      const win = BrowserWindow.fromWebContents(event.sender);
-      if (win) {
-        const DASHBOARD_PAGE = path.join(__dirname, 'renderer', 'shop', 'dashboard', 'control.html');
-        win.loadFile(DASHBOARD_PAGE);
+    if (!Number.isInteger(noCards) || noCards < 1 || noCards > 10000) {
+      return { status: 'error', message: 'Invalid cartela count.' };
+    }
+    if (!Number.isFinite(price) || price <= 0 || price > 1_000_000) {
+      return { status: 'error', message: 'Invalid cartela price.' };
+    }
+    if (!Number.isFinite(collected) || collected <= 0 || collected > 1_000_000_000) {
+      return { status: 'error', message: 'Invalid collected amount.' };
+    }
+    const expectedCollected = Math.round((noCards * price + Number.EPSILON) * 100) / 100;
+    if (Math.abs(collected - expectedCollected) > 0.01) {
+      return { status: 'error', message: 'Collected amount does not match cartela count and price.' };
+    }
+    if (!Number.isFinite(commission) || commission < 0 || commission > collected) {
+      return { status: 'error', message: 'Invalid commission amount.' };
+    }
+
+    return await withImmediateTransaction(async () => {
+      const session = await getAsync(
+        `SELECT * FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
+      );
+      const sessionUserType = session ? decryptValue('session', session[C.session.user_type]) : null;
+      if (!session || !session[C.session.user_id] || !session[C.session.shop_id] || sessionUserType !== 'shop_user') {
+        throw new Error('Your local session has expired. Please log in again.');
       }
-      return { status: "error" };
-    }
 
-    const user_id = session[C.session.user_id];
-    const shop_id = session[C.session.shop_id];
+      const userId = session[C.session.user_id];
+      const shopId = session[C.session.shop_id];
+      const shop = await getAsync(
+        `SELECT ${C.shops.current_balance} AS bal, ${C.shops.sales_record_count} AS cnt
+         FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
+        [shopId]
+      );
+      if (!shop) throw new Error('Local shop record not found.');
 
-    const shop = await getAsync(
-      `SELECT ${C.shops.current_balance} AS bal FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-      [shop_id]
-    );
-    if (!shop) {
-      const win = BrowserWindow.fromWebContents(event.sender);
-      if (win) {
-        const DASHBOARD_PAGE = path.join(__dirname, 'renderer', 'shop', 'dashboard', 'control.html');
-        win.loadFile(DASHBOARD_PAGE);
-      }
-      return { status: "error" };
-    }
+      const currentBalance = decNum('shops', shop.bal);
+      const roundedCommission = Math.round((commission + Number.EPSILON) * 100) / 100;
+      const newBalance = Math.round((currentBalance - roundedCommission + Number.EPSILON) * 100) / 100;
+      if (newBalance < 0) throw new Error('Insufficient local credit for this game.');
 
-    const current_balance = decNum('shops', shop.bal);
-    const commissionAmount = parseFloat(commission) || 0;
-    const new_balance = current_balance - commissionAmount;
+      await runAsync(
+        `UPDATE ${T.shops}
+         SET ${C.shops.current_balance} = ?, ${C.shops.sales_record_count} = ?
+         WHERE ${C.shops.shop_id} = ?`,
+        [
+          encryptValue('shops', newBalance.toFixed(2)),
+          encryptValue('shops', String(decInt('shops', shop.cnt) + 1)),
+          shopId
+        ]
+      );
 
-    if (new_balance < 0) {
-      const win = BrowserWindow.fromWebContents(event.sender);
-      if (win) {
-        const DASHBOARD_PAGE = path.join(__dirname, 'renderer', 'shop', 'dashboard', 'control.html');
-        win.loadFile(DASHBOARD_PAGE);
-      }
-      return { status: "error" };
-    }
+      const startedAt = nowSql();
+      const result = await runAsync(`
+        INSERT INTO ${T.sales} (
+          ${C.sales.shop_id}, ${C.sales.user_id}, ${C.sales.no_cards}, ${C.sales.price},
+          ${C.sales.collected}, ${C.sales.commission}, ${C.sales.balance_after_sales},
+          ${C.sales.started_time}, ${C.sales.synced}
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `, [
+        shopId,
+        userId,
+        encryptValue('sales', String(noCards)),
+        encryptValue('sales', price.toFixed(2)),
+        encryptValue('sales', collected.toFixed(2)),
+        encryptValue('sales', roundedCommission.toFixed(2)),
+        encryptValue('sales', newBalance.toFixed(2)),
+        startedAt
+      ]);
 
-    await runAsync("BEGIN TRANSACTION");
-
-    await runAsync(
-      `UPDATE ${T.shops} SET ${C.shops.current_balance} = ? WHERE ${C.shops.shop_id} = ?`,
-      [encryptValue('shops', new_balance.toFixed(2)), shop_id]
-    );
-
-    const counterRow = await getAsync(
-      `SELECT ${C.shops.sales_record_count} AS cnt FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-      [shop_id]
-    );
-    const oldCount = decInt('shops', counterRow?.cnt);
-    const newCount = oldCount + 1;
-    await runAsync(
-      `UPDATE ${T.shops} SET ${C.shops.sales_record_count} = ? WHERE ${C.shops.shop_id} = ?`,
-      [encryptValue('shops', String(newCount)), shop_id]
-    );
-
-    const now = (() => {
-      const d = new Date();
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    })();
-
-    const result = await runAsync(`
-      INSERT INTO ${T.sales} (
-        ${C.sales.shop_id}, ${C.sales.user_id}, ${C.sales.no_cards}, ${C.sales.price},
-        ${C.sales.collected}, ${C.sales.commission}, ${C.sales.balance_after_sales},
-        ${C.sales.started_time}, ${C.sales.synced}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-    `, [
-      shop_id, user_id,
-      encryptValue('sales', no_cards),
-      encryptValue('sales', price),
-      encryptValue('sales', collected),
-      encryptValue('sales', commission),
-      encryptValue('sales', new_balance.toFixed(2)),
-      now
-    ]);
-
-    await runAsync("COMMIT");
-
-    return {
-      status: "success",
-      message: "Game registered successfully",
-      sales_id: result.lastID,
-      started_time: now,
-      new_balance
-    };
-
-  } catch (err) {
-    await runAsync("ROLLBACK").catch(() => {});
-    console.error("register-sales error:", err);
-
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) {
-      const DASHBOARD_PAGE = path.join(__dirname, 'renderer', 'shop', 'dashboard', 'control.html');
-      win.loadFile(DASHBOARD_PAGE);
-    }
-
-    return { status: "error" };
+      return {
+        status: 'success',
+        message: 'Game registered successfully',
+        sales_id: result.lastID,
+        started_time: startedAt,
+        new_balance: newBalance
+      };
+    });
+  } catch (error) {
+    console.error('register-sales error:', error);
+    return { status: 'error', message: error.message || 'Could not register this game.' };
   }
 });
 
 // Handle update-sales event
-ipcMain.handle('update-sales', async (event, data) => {
+ipcMain.handle('update-sales', async (_event, data = {}) => {
   const { started_time, last_number, count } = data;
 
-  if (!started_time) {
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(started_time || ''))) {
     return { status: "error", message: "Missing started_time" };
+  }
+  if (last_number !== undefined && (!Number.isInteger(Number(last_number)) || Number(last_number) < 0 || Number(last_number) > 75)) {
+    return { status: 'error', message: 'Invalid last called number.' };
+  }
+  if (count !== undefined && (!Number.isInteger(Number(count)) || Number(count) < 0 || Number(count) > 75)) {
+    return { status: 'error', message: 'Invalid called-number count.' };
   }
 
   try {
-    const sale = await getAsync(
-      `SELECT * FROM ${T.sales} WHERE ${C.sales.started_time} = ? AND ${C.sales.ended_time} IS NULL`,
-      [started_time]
+    const active = await getAsync(
+      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
     );
-    if (!sale) {
-      return { status: "error", message: "No active sale found with this started_time" };
-    }
+    if (!active?.shop_id) return { status: 'error', message: 'No active local account.' };
 
     const fields = [];
     const params = [];
 
     if (last_number !== undefined) {
       fields.push(`${C.sales.on_call} = ?`);
-      params.push(encryptValue('sales', last_number));
+      params.push(encryptValue('sales', Number(last_number)));
     }
 
     if (count !== undefined) {
       fields.push(`${C.sales.total_called} = ?`);
-      params.push(encryptValue('sales', count));
+      params.push(encryptValue('sales', Number(count)));
     }
 
     const ended_time = (() => {
@@ -1418,13 +1520,17 @@ ipcMain.handle('update-sales', async (event, data) => {
     fields.push(`${C.sales.ended_time} = ?`);
     params.push(ended_time);
 
-    params.push(started_time);
+    params.push(started_time, active.shop_id);
 
-    const sql = `UPDATE ${T.sales} SET ${fields.join(", ")} WHERE ${C.sales.started_time} = ? AND ${C.sales.ended_time} IS NULL`;
+    const sql = `UPDATE ${T.sales}
+      SET ${fields.join(", ")}
+      WHERE ${C.sales.started_time} = ?
+        AND ${C.sales.shop_id} = ?
+        AND ${C.sales.ended_time} IS NULL`;
 
     const result = await runAsync(sql, params);
 
-    if (result.changes > 0 || result.lastID) {
+    if (result.changes > 0) {
       return { status: "success", message: "Sales updated successfully", ended_time };
     } else {
       return { status: "error", message: "No matching record found or already ended" };
@@ -1436,11 +1542,15 @@ ipcMain.handle('update-sales', async (event, data) => {
   }
 });
 
-ipcMain.handle('get-daily-income', async (event, data) => {
-  const { from_date, to_date } = data;
+ipcMain.handle('get-daily-income', async (_event, data = {}) => {
+  const fromDate = String(data.from_date || '');
+  const toDate = String(data.to_date || '');
 
-  if (!from_date || !to_date) {
-    return { status: "error", message: "Missing dates", total: 0 };
+  if (!isIsoCalendarDate(fromDate) || !isIsoCalendarDate(toDate)) {
+    return { status: "error", message: "Invalid date range", total: 0 };
+  }
+  if (fromDate > toDate) {
+    return { status: "error", message: "The start date must not be after the end date", total: 0 };
   }
 
   try {
@@ -1462,7 +1572,7 @@ ipcMain.handle('get-daily-income', async (event, data) => {
     let total = 0;
     for (const row of rows) {
       const dt = (row.st || '').slice(0, 10);
-      if (dt >= from_date && dt <= to_date) {
+      if (dt >= fromDate && dt <= toDate) {
         total += decNum('sales', row.comm);
       }
     }
@@ -1566,107 +1676,71 @@ ipcMain.handle('get-sales-history', async () => {
   }
 });
 
-ipcMain.handle('review-balance', async (event, commissionAmount) => {
-  return new Promise((resolve) => {
-    db.get(
-      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`,
-      (err, row) => {
-        if (err) {
-          console.error("❌ Session query failed:", err.message);
-          return resolve({ status: 'error', message: 'የክፍለ ጊዜ መረጃ ማግኘት አልተሳካም።' });
-        }
-
-        if (!row) {
-          console.warn("⚠️ No active session found!");
-          return resolve({ status: 'error', message: 'የአስተዳዳሪ ክፍለ ጊዜ አልተገኘም።' });
-        }
-
-        const active_shop_id = row.shop_id;
-
-        db.get(
-          `SELECT ${C.shops.current_balance} AS bal FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-          [active_shop_id],
-          (err, shop) => {
-            if (err) {
-              console.error("❌ Database error during balance check:", err.message);
-              return resolve({ status: 'error', message: 'የዳታቤዝ ስህተት ተከስቷል።' });
-            }
-
-            if (!shop) {
-              console.warn(`⚠️ No shop found for shop_id: ${active_shop_id}`);
-              return resolve({ status: 'error', message: 'የሱቅ መረጃ አልተገኘም።' });
-            }
-
-            const currentBalance = decNum('shops', shop.bal);
-            const requiredAmount = parseFloat(commissionAmount || 0);
-
-            if (currentBalance < requiredAmount) {
-              console.warn(`⚠️ Insufficient balance. Have ${currentBalance}, need ${requiredAmount}`);
-              return resolve({
-                status: 'insufficient',
-                message: 'በቂ ቀሪ ሂሳብ የለም!',
-                current_balance: currentBalance,
-                required: requiredAmount
-              });
-            }
-
-            console.log(`✅ Balance check passed for shop_id ${active_shop_id}`);
-            return resolve({
-              status: 'ok',
-              message: 'በቂ ቀሪ ሂሳብ አለ።',
-              current_balance: currentBalance
-            });
-          }
-        );
-      }
+ipcMain.handle('review-balance', async (_event, commissionAmount) => {
+  const requiredAmount = Number(commissionAmount);
+  if (!Number.isFinite(requiredAmount) || requiredAmount < 0 || requiredAmount > 1_000_000_000) {
+    return { status: 'error', message: 'Invalid commission amount.' };
+  }
+  try {
+    const sessionRow = await getAsync(
+      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
     );
-  });
+    if (!sessionRow?.shop_id) {
+      return { status: 'error', message: 'የአስተዳዳሪ ክፍለ ጊዜ አልተገኘም።' };
+    }
+    const shop = await getAsync(
+      `SELECT ${C.shops.current_balance} AS bal FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
+      [sessionRow.shop_id]
+    );
+    if (!shop) return { status: 'error', message: 'የሱቅ መረጃ አልተገኘም።' };
+
+    const currentBalance = decNum('shops', shop.bal);
+    if (currentBalance < requiredAmount) {
+      return {
+        status: 'insufficient',
+        message: 'በቂ ቀሪ ሂሳብ የለም!',
+        current_balance: currentBalance,
+        required: requiredAmount
+      };
+    }
+    return {
+      status: 'ok',
+      message: 'በቂ ቀሪ ሂሳብ አለ።',
+      current_balance: currentBalance
+    };
+  } catch (error) {
+    console.error('Balance review failed:', error);
+    return { status: 'error', message: 'የዳታቤዝ ስህተት ተከስቷል።' };
+  }
 });
 
 const LOW_BALANCE_THRESHOLD = 2000.00;
 
-ipcMain.handle('notify-balance', async (event) => {
-  return new Promise((resolve) => {
-    db.get(
-      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`,
-      (err, sessionRow) => {
-        if (err || !sessionRow || !sessionRow.shop_id) {
-          console.error("DB Error fetching shop session or shop_id:", err ? err.message : 'No shop session');
-          return resolve({ status: 'error', message: 'Failed to retrieve shop session.' });
-        }
-
-        const shopId = sessionRow.shop_id;
-
-        db.get(
-          `SELECT ${C.shops.current_balance} AS bal, ${C.shops.shop_name} AS sn FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-          [shopId],
-          (err, shopRow) => {
-            if (err || !shopRow) {
-              console.error("DB Error fetching shop balance:", err ? err.message : 'Shop not found');
-              return resolve({ status: 'error', message: 'Shop information not found.' });
-            }
-
-            const currentBalance = decNum('shops', shopRow.bal);
-            const shopName = decryptValue('shops', shopRow.sn) || 'Your Shop';
-
-            let status = 'ok';
-            let message = `Current Balance: ${currentBalance.toFixed(2)}`;
-
-            if (currentBalance < LOW_BALANCE_THRESHOLD) {
-              status = 'low';
-              message = `${shopName} has a low balance! Please call and deposit .`;
-            }
-
-            resolve({ status, message, balance: currentBalance });
-          }
-        );
-      }
+ipcMain.handle('notify-balance', async () => {
+  try {
+    const sessionRow = await getAsync(
+      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
     );
-  });
+    if (!sessionRow?.shop_id) return { status: 'error', message: 'Failed to retrieve shop session.' };
+    const shopRow = await getAsync(
+      `SELECT ${C.shops.current_balance} AS bal, ${C.shops.shop_name} AS sn FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
+      [sessionRow.shop_id]
+    );
+    if (!shopRow) return { status: 'error', message: 'Shop information not found.' };
+
+    const currentBalance = decNum('shops', shopRow.bal);
+    const shopName = decryptValue('shops', shopRow.sn) || 'Your Shop';
+    return currentBalance < LOW_BALANCE_THRESHOLD
+      ? { status: 'low', message: `${shopName} has a low balance! Please fill credit with a signed voucher.`, balance: currentBalance }
+      : { status: 'ok', message: `Current Balance: ${currentBalance.toFixed(2)}`, balance: currentBalance };
+  } catch (error) {
+    console.error('Balance notification failed:', error);
+    return { status: 'error', message: 'Shop information not found.' };
+  }
 });
 
 // GET shop settings (used by data.html and game.html)
-ipcMain.handle('get-shop-setting', async (event) => {
+ipcMain.handle('get-shop-setting', async () => {
   try {
     const session = await getAsync(
       `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
@@ -1677,37 +1751,40 @@ ipcMain.handle('get-shop-setting', async (event) => {
 
     const shopId = session.shop_id;
 
-    return await new Promise((resolve) => {
-      db.get(`
+    const row = await getAsync(`
         SELECT ${C.shop_settings.game_time_gap} AS gt, ${C.shop_settings.voices_game} AS vg, ${C.shop_settings.commission_game} AS cg
         FROM ${T.shop_settings}
         WHERE ${C.shop_settings.shop_id} = ?
-      `, [shopId], (err, row) => {
-        if (err) {
-          console.error('get-shop-setting error:', err.message);
-          return resolve({ success: false, message: err.message });
-        }
-
-        const storedCommission = row ? decryptValue('shop_settings', row.cg) || 'A' : 'A';
-        const commissionSettings = parseCommissionSettings(storedCommission);
-        const settings = {
-          gameTimeGap: row ? decInt('shop_settings', row.gt) || 5000 : 5000,
-          voicesGame: row ? decryptValue('shop_settings', row.vg) || 'A' : 'A',
-          commissionGame: commissionSettings.mode === 'preset' ? commissionSettings.preset : 'CUSTOM',
-          commissionSettings
-        };
-
-        resolve({ success: true, settings });
-      });
-    });
+      `, [shopId]);
+    const storedCommission = row ? decryptValue('shop_settings', row.cg) || 'A' : 'A';
+    const commissionSettings = parseCommissionSettings(storedCommission);
+    const storedGap = row ? decInt('shop_settings', row.gt) : 5000;
+    const gameTimeGap = Number.isInteger(storedGap) && storedGap >= 1000 && storedGap <= 10000
+      ? storedGap
+      : 5000;
+    const storedVoice = row ? decryptValue('shop_settings', row.vg) : 'A';
+    const voicesGame = ['A', 'O', 'TG', 'AF', 'T'].includes(storedVoice) ? storedVoice : 'A';
+    return {
+      success: true,
+      settings: {
+        gameTimeGap,
+        voicesGame,
+        commissionGame: commissionSettings.mode === 'preset' ? commissionSettings.preset : 'CUSTOM',
+        commissionSettings
+      }
+    };
   } catch (error) {
     return { success: false, message: error.message };
   }
 });
 
 // UPDATE Game Time Gap
-ipcMain.handle('update-game-time-gap', async (event, gapMs) => {
+ipcMain.handle('update-game-time-gap', async (_event, gapMs) => {
   try {
+    const normalizedGap = Number(gapMs);
+    if (!Number.isInteger(normalizedGap) || normalizedGap < 1000 || normalizedGap > 10000) {
+      return { success: false, message: 'Call timing must be between 1 and 10 seconds.' };
+    }
     const session = await getAsync(
       `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
     );
@@ -1716,29 +1793,33 @@ ipcMain.handle('update-game-time-gap', async (event, gapMs) => {
     }
     const shopId = session.shop_id;
 
-    return await new Promise((resolve, reject) => {
-      db.run(`
-        INSERT INTO ${T.shop_settings} (${C.shop_settings.shop_id}, ${C.shop_settings.game_time_gap}, ${C.shop_settings.voices_game})
-        VALUES (?, ?, (SELECT ${C.shop_settings.voices_game} FROM ${T.shop_settings} WHERE ${C.shop_settings.shop_id} = ?) )
+    await runAsync(`
+        INSERT INTO ${T.shop_settings} (
+          ${C.shop_settings.shop_id}, ${C.shop_settings.game_time_gap},
+          ${C.shop_settings.voices_game}, ${C.shop_settings.commission_game}
+        ) VALUES (?, ?, ?, ?)
         ON CONFLICT(${C.shop_settings.shop_id})
         DO UPDATE SET ${C.shop_settings.game_time_gap} = excluded.${C.shop_settings.game_time_gap}
-        `,
-        [shopId, encryptValue('shop_settings', String(gapMs)), shopId], function(err) {
-        if (err) {
-          console.error('update-game-time-gap error:', err.message);
-          return reject({ success: false, message: err.message });
-        }
-        resolve({ success: true, message: 'Call timing updated successfully' });
-      });
-    });
+      `, [
+        shopId,
+        encryptValue('shop_settings', String(normalizedGap)),
+        encryptValue('shop_settings', 'A'),
+        encryptValue('shop_settings', 'A')
+      ]);
+    return { success: true, message: 'Call timing updated successfully' };
   } catch (error) {
-    return { success: false, message: error };
+    console.error('update-game-time-gap error:', error.message);
+    return { success: false, message: error.message };
   }
 });
 
 // UPDATE Voices Game
-ipcMain.handle('update-voices-game', async (event, voiceCode) => {
+ipcMain.handle('update-voices-game', async (_event, voiceCode) => {
   try {
+    const normalizedVoice = String(voiceCode || '').trim();
+    if (!['A', 'O', 'TG', 'AF', 'T'].includes(normalizedVoice)) {
+      return { success: false, message: 'That voice is not installed.' };
+    }
     const session = await getAsync(
       `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
     );
@@ -1747,23 +1828,23 @@ ipcMain.handle('update-voices-game', async (event, voiceCode) => {
     }
     const shopId = session.shop_id;
 
-    return await new Promise((resolve, reject) => {
-      db.run(`
-        INSERT INTO ${T.shop_settings} (${C.shop_settings.shop_id}, ${C.shop_settings.voices_game}, ${C.shop_settings.game_time_gap})
-        VALUES (?, ?, (SELECT ${C.shop_settings.game_time_gap} FROM ${T.shop_settings} WHERE ${C.shop_settings.shop_id} = ?) )
+    await runAsync(`
+        INSERT INTO ${T.shop_settings} (
+          ${C.shop_settings.shop_id}, ${C.shop_settings.voices_game},
+          ${C.shop_settings.game_time_gap}, ${C.shop_settings.commission_game}
+        ) VALUES (?, ?, ?, ?)
         ON CONFLICT(${C.shop_settings.shop_id})
         DO UPDATE SET ${C.shop_settings.voices_game} = excluded.${C.shop_settings.voices_game}
-        `,
-        [shopId, encryptValue('shop_settings', voiceCode), shopId], function(err) {
-        if (err) {
-          console.error('update-voices-game error:', err.message);
-          return reject({ success: false, message: err.message });
-        }
-        resolve({ success: true, message: 'Call voice updated successfully' });
-      });
-    });
+      `, [
+        shopId,
+        encryptValue('shop_settings', normalizedVoice),
+        encryptValue('shop_settings', '5000'),
+        encryptValue('shop_settings', 'A')
+      ]);
+    return { success: true, message: 'Call voice updated successfully' };
   } catch (error) {
-    return { success: false, message: error };
+    console.error('update-voices-game error:', error.message);
+    return { success: false, message: error.message };
   }
 });
 
@@ -1784,29 +1865,23 @@ ipcMain.handle('update-commission-game', async (_event, requestedSettings) => {
     }
     const shopId = session.shop_id;
 
-    return await new Promise((resolve) => {
-      db.run(`
+    await runAsync(`
         INSERT INTO ${T.shop_settings} (
           ${C.shop_settings.shop_id}, ${C.shop_settings.commission_game}, ${C.shop_settings.game_time_gap}, ${C.shop_settings.voices_game}
-        ) VALUES (
-          ?, ?,
-          (SELECT ${C.shop_settings.game_time_gap} FROM ${T.shop_settings} WHERE ${C.shop_settings.shop_id} = ?),
-          (SELECT ${C.shop_settings.voices_game} FROM ${T.shop_settings} WHERE ${C.shop_settings.shop_id} = ?)
-        )
+        ) VALUES (?, ?, ?, ?)
         ON CONFLICT(${C.shop_settings.shop_id}) DO UPDATE SET
           ${C.shop_settings.commission_game} = excluded.${C.shop_settings.commission_game}
-      `, [shopId, encryptValue('shop_settings', serializeCommissionSettings(commissionSettings)), shopId, shopId], function(err) {
-        if (err) {
-          console.error('update-commission-game error:', err.message);
-          return resolve({ success: false, message: err.message });
-        }
-        resolve({
-          success: true,
-          message: 'Commission updated successfully',
-          settings: commissionSettings
-        });
-      });
-    });
+      `, [
+        shopId,
+        encryptValue('shop_settings', serializeCommissionSettings(commissionSettings)),
+        encryptValue('shop_settings', '5000'),
+        encryptValue('shop_settings', 'A')
+      ]);
+    return {
+      success: true,
+      message: 'Commission updated successfully',
+      settings: commissionSettings
+    };
   } catch (error) {
     return { success: false, message: error.message };
   }
@@ -1842,43 +1917,38 @@ ipcMain.on('open-game-page', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
 
-  // Local access requires a valid session and enough locally managed credit.
-  db.get(
-    `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`,
-    (err, session) => {
-      if (err || !session || !session.shop_id) {
-        win.loadFile(DASHBOARD_PAGE);
-        win.webContents.executeJavaScript(`displayError("Session expired. Please log in again.");`);
-        return;
-      }
-
-      const shopId = session.shop_id;
-
-      db.get(
-        `SELECT ${C.shops.current_balance} AS bal, ${C.shops.shop_name} AS sn FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
-        [shopId],
-        (err, shop) => {
-          if (err || !shop) {
-            win.loadFile(DASHBOARD_PAGE);
-            win.webContents.executeJavaScript(`displayError("Shop data not found.");`);
-            return;
-          }
-
-          const balance = decNum('shops', shop.bal);
-          const shopName = decryptValue('shops', shop.sn) || 'Shop';
-          const gameCost = 100;
-
-          if (balance >= gameCost) {
-            win.loadFile(GAME_PAGE);
-            console.log(`Game access granted for shop ${shopName} (balance: ${balance})`);
-          } else {
-            win.loadFile(NO_BALANCE_PAGE);
-            console.log(`Game access denied: low balance (${balance})`);
-          }
-        }
-      );
+  try {
+    const activeSession = await getAsync(
+      `SELECT ${C.session.shop_id} AS shop_id FROM ${T.session} WHERE ${C.session.active} = 1 LIMIT 1`
+    );
+    if (!activeSession?.shop_id) {
+      await win.loadFile(DASHBOARD_PAGE);
+      await win.webContents.executeJavaScript(`displayError("Session expired. Please log in again.");`);
+      return;
     }
-  );
+    const shop = await getAsync(
+      `SELECT ${C.shops.current_balance} AS bal, ${C.shops.shop_name} AS sn FROM ${T.shops} WHERE ${C.shops.shop_id} = ?`,
+      [activeSession.shop_id]
+    );
+    if (!shop) {
+      await win.loadFile(DASHBOARD_PAGE);
+      await win.webContents.executeJavaScript(`displayError("Shop data not found.");`);
+      return;
+    }
+
+    const balance = decNum('shops', shop.bal);
+    const shopName = decryptValue('shops', shop.sn) || 'Shop';
+    if (balance >= 100) {
+      await win.loadFile(GAME_PAGE);
+      console.log(`Game access granted for shop ${shopName} (balance: ${balance})`);
+    } else {
+      await win.loadFile(NO_BALANCE_PAGE);
+      console.log(`Game access denied: low balance (${balance})`);
+    }
+  } catch (error) {
+    writeStartupLog('ERROR', `Could not open the game page: ${errorDetails(error)}`);
+    await win.loadFile(DASHBOARD_PAGE).catch(() => {});
+  }
 });
 
 // ============================================================
@@ -1897,8 +1967,54 @@ ipcMain.on('devtools-opened', (event) => {
 });
 
 ipcMain.on('quit-app', () => {
-  app.quit();
+  requestGracefulQuit();
 });
+
+function closeDatabase() {
+  if (databaseClosePromise) return databaseClosePromise;
+  if (!db) return Promise.resolve();
+
+  const database = db;
+  db = null;
+  databaseClosePromise = new Promise(resolve => {
+    try {
+      database.close(error => {
+        if (error) writeStartupLog('ERROR', `Could not close SQLite cleanly: ${errorDetails(error)}`);
+        resolve();
+      });
+    } catch (error) {
+      writeStartupLog('ERROR', `Could not close SQLite cleanly: ${errorDetails(error)}`);
+      resolve();
+    }
+  });
+  return databaseClosePromise;
+}
+
+function shutdownResources() {
+  if (shutdownPromise) return shutdownPromise;
+  stopBalanceReconciler();
+  stopSalesChecker();
+  shutdownPromise = Promise.allSettled([
+    mobileRoom.stop(),
+    databaseQueue.then(() => closeDatabase())
+  ]).then(results => {
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        writeStartupLog('ERROR', `Shutdown task failed: ${errorDetails(result.reason)}`);
+      }
+    }
+  });
+  return shutdownPromise;
+}
+
+async function requestGracefulQuit(event) {
+  if (allowImmediateQuit) return;
+  event?.preventDefault?.();
+  await shutdownResources();
+  if (allowImmediateQuit) return;
+  allowImmediateQuit = true;
+  app.quit();
+}
 
 async function loadAuthorizedEntry(win) {
   const status = licenseService.getStatus();
@@ -1909,20 +2025,16 @@ async function loadAuthorizedEntry(win) {
 
   const loginPage = path.join(__dirname, 'renderer', 'index.html');
   const dashboardPage = path.join(__dirname, 'renderer', 'shop', 'dashboard', 'control.html');
-  await new Promise(resolve => {
-    db.get(
-      `SELECT s.${C.session.shop_id} AS shop_id
+  const row = await getAsync(
+    `SELECT s.${C.session.shop_id} AS shop_id
        FROM ${T.session} s
        INNER JOIN ${T.local_accounts} a
          ON a.${C.local_accounts.user_id} = s.${C.session.user_id}
         AND a.${C.local_accounts.shop_id} = s.${C.session.shop_id}
        WHERE s.${C.session.active} = 1
-       LIMIT 1`,
-      (error, row) => {
-        win.loadFile(!error && row ? dashboardPage : loginPage).finally(resolve);
-      }
-    );
-  });
+       LIMIT 1`
+  );
+  await win.loadFile(row ? dashboardPage : loginPage);
 }
 
 // --- Create Window and Initialize DB ---
@@ -1946,7 +2058,7 @@ function createWindow() {
     }
     console.log(`Connecting to database at: ${dbPath}`);
 
-    db = new sqlite3.Database(dbPath, (err) => {
+    db = new sqlite3.Database(dbPath, async (err) => {
       if (err) {
         reportStartupFailure('The local database could not be opened.', err);
         app.quit();
@@ -1955,7 +2067,10 @@ function createWindow() {
 
       try {
         console.log('Database connected successfully.');
-        createTables(db);
+        db.on?.('error', error => {
+          writeStartupLog('ERROR', `SQLite runtime error: ${errorDetails(error)}`);
+        });
+        await createTables(db);
 
         startBalanceReconciler();
         startSalesChecker();
@@ -1973,7 +2088,14 @@ function createWindow() {
           }
         });
 
-        win.once('ready-to-show', () => win.show());
+        win.once('ready-to-show', () => {
+          if (startupSmokeTest) {
+            writeStartupLog('INFO', 'PACKAGED_SMOKE_TEST_READY');
+            shutdownResources().finally(() => app.exit(0));
+            return;
+          }
+          win.show();
+        });
         secureWebContents(win.webContents);
 
         // ⭐ did-finish-load: DevTools detection injection + game page unsynced-sales check
@@ -2004,25 +2126,21 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow).catch(error => {
-  reportStartupFailure('Electron could not finish starting.', error);
-  app.quit();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    mobileRoom.stop().catch(() => {});
-    stopBalanceReconciler();
-    stopSalesChecker();
-    if (db) db.close();
+if (hasSingleInstanceLock) {
+  app.whenReady().then(createWindow).catch(error => {
+    reportStartupFailure('Electron could not finish starting.', error);
     app.quit();
+  });
+}
+
+app.on('window-all-closed', async () => {
+  if (process.platform !== 'darwin') {
+    await requestGracefulQuit();
   }
 });
 
-app.on('before-quit', () => {
-  mobileRoom.stop().catch(() => {});
-  stopBalanceReconciler();
-  stopSalesChecker();
+app.on('before-quit', event => {
+  if (!allowImmediateQuit) requestGracefulQuit(event);
 });
 
 process.on('uncaughtException', error => {

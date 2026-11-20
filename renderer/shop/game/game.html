@@ -1329,6 +1329,11 @@
 
 
 const startPrice =10;
+window.gameTimeGap = 5000;
+window.voicesGame = "A";
+window.commissionGame = "A";
+window.commissionSettings = null;
+
  async function loadGameSettings() {
     try {
         const resp = await window.api.getShopSetting();   // <-- exposed in preload.js
@@ -1344,19 +1349,22 @@ const startPrice =10;
             window.gameTimeGap = 5000;
             window.voicesGame   = "A";
             window.commissionGame = "A";
+            window.commissionSettings = null;
         }
     } catch (err) {
         console.warn("Failed to load shop settings – using defaults", err);
         window.gameTimeGap = 5000;
         window.voicesGame   = "A";
         window.commissionGame = "A";
-    } }
+        window.commissionSettings = null;
+    }
+ }
 
 
 /* --------------------------------------------------------------
    Run the loader **as soon as the DOM is ready** (before any game logic)
    -------------------------------------------------------------- */
-document.addEventListener("DOMContentLoaded", loadGameSettings);
+const gameSettingsReady = loadGameSettings();
     var linesInput = 1;
 
     let currentValue = 10;
@@ -1937,10 +1945,6 @@ shuffleButton.addEventListener("click", () => {
    playSmallSound('shake');
 
     createShakerBalls();
-
-    audio.onended = () => {
-        console.log("Audio ended, you can trigger other events here if needed");
-    };
 });
 
 </script>
@@ -2087,9 +2091,11 @@ async function preloadAudios(voicesGame) {
         const existing = await getAudio(key);
 
         if (!existing) {
-            const url = `audio/${voicesGame}${i}.mp3`;
+            const fileVoice = voicesGame === 'O' && i >= 61 ? 'o' : voicesGame;
+            const url = `audio/${fileVoice}${i}.mp3`;
             try {
                 const response = await fetch(url);
+                if (!response.ok) throw new Error(`Audio file is unavailable (${response.status}).`);
                 const blob = await response.blob();
                 await saveAudio(key, blob);
                 console.log("Saved audio:", key);
@@ -2110,53 +2116,39 @@ async function preloadAudios(voicesGame) {
 // ==============================
 async function playAudio(voicesGame, number) {
     const key = `${voicesGame}-${number}`;
-    const cached = await getAudio(key);
-
-    if (cached) {
-        const url = URL.createObjectURL(cached);
-        const audio = new Audio(url);
-        audio.play();
-    } else {
-        // fallback if not cached yet
-        const audio = new Audio(`audio/${voicesGame}${number}.mp3`);
-        audio.play();
+    try {
+        const cached = await getAudio(key);
+        if (cached) {
+            const url = URL.createObjectURL(cached);
+            const audio = new Audio(url);
+            audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true });
+            audio.addEventListener('error', () => URL.revokeObjectURL(url), { once: true });
+            await audio.play();
+            return;
+        }
+    } catch (error) {
+        console.warn('Cached number audio could not be played:', error);
     }
+
+    // The supplied Oromiffa files use a lowercase prefix for 61-75.
+    const fileVoice = voicesGame === 'O' && number >= 61 ? 'o' : voicesGame;
+    const audio = new Audio(`audio/${fileVoice}${number}.mp3`);
+    await audio.play().catch(error => console.warn('Bundled number audio could not be played:', error));
 }
 
 // ==============================
 // Run Preload on Page Load
 // ==============================
 window.addEventListener("load", () => {
-    preloadAudios(voicesGame); // <-- voicesGame must be defined globally
+    gameSettingsReady
+        .then(() => preloadAudios(window.voicesGame))
+        .catch(error => console.warn('Number audio preload failed:', error));
 });
 
 
 // List of small sounds
 const smallSounds = ['win', 'start', 'shake'];
 const smallAudioObjects = {}; // store Audio objects after loading
-
-// ==============================
-// IndexedDB Helpers
-// ==============================
-async function saveAudio(key, blob) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction("audios", "readwrite");
-        tx.objectStore("audios").put(blob, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = (e) => reject(e.target.error);
-    });
-}
-
-async function getAudio(key) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction("audios", "readonly");
-        const request = tx.objectStore("audios").get(key);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
 
 // ==============================
 // Preload small sounds silently
@@ -2195,6 +2187,7 @@ async function preloadSmallSounds() {
         if (!cached) {
             try {
                 const response = await fetch(`audio/${name}.mp3`);
+                if (!response.ok) throw new Error(`Sound file is unavailable (${response.status}).`);
                 const blob = await response.blob();
                 await saveAudio(key, blob);
                 cached = blob;
@@ -2215,11 +2208,12 @@ async function preloadSmallSounds() {
 function playSmallSound(name) {
     const audioObj = smallAudioObjects[name];
     if (audioObj) {
-        audioObj.play();
+        audioObj.currentTime = 0;
+        audioObj.play().catch(error => console.warn(`Could not play ${name}:`, error));
     } else {
         // fallback to the bundled local audio file if not cached
         const fallback = new Audio(`audio/${name}.mp3`);
-        fallback.play();
+        fallback.play().catch(error => console.warn(`Could not play ${name}:`, error));
     }
 }
 
@@ -2227,7 +2221,7 @@ function playSmallSound(name) {
 // Run preload on page load
 // ==============================
 window.addEventListener("load", () => {
-    preloadSmallSounds();
+    preloadSmallSounds().catch(error => console.warn('Effect audio preload failed:', error));
 });
 
 
@@ -2284,13 +2278,15 @@ window.addEventListener("load", () => {
 let startedTimePhp;
 
 // --- Start button ---
-startButton.addEventListener("click", () => {
-
-     // --- UI and control changes ---
-                startButton.disabled = true;
-                pauseButton.disabled = false;
-                openBtn.disabled = true;
-                newGameBtn.disabled = true;
+startButton.addEventListener("click", async () => {
+    await gameSettingsReady;
+    const previousControls = {
+        start: startButton.disabled,
+        pause: pauseButton.disabled,
+        open: openBtn.disabled,
+        newGame: newGameBtn.disabled
+    };
+    startButton.disabled = true;
     // Prepare the data to send to Electron backend
     const saleData = {
         no_cards: selected_cards.length,
@@ -2302,8 +2298,8 @@ startButton.addEventListener("click", () => {
     console.log("Sending saleData to Electron:", saleData);
 
     // Send data to backend through preload.js bridge
-    window.api.registerSales(saleData)
-        .then(result => {
+    try {
+        const result = await window.api.registerSales(saleData);
             console.log("RegisterSales result:", result);
 
             if (result.status === "success") {
@@ -2334,12 +2330,19 @@ startButton.addEventListener("click", () => {
                 // Failed: maybe insufficient balance or invalid session
                 console.error("Registration failed:", result.message);
                 alert("Error: " + result.message);
+                startButton.disabled = previousControls.start;
+                pauseButton.disabled = previousControls.pause;
+                openBtn.disabled = previousControls.open;
+                newGameBtn.disabled = previousControls.newGame;
             }
-        })
-        .catch(error => {
-            console.error("RegisterSales error:", error);
-            alert("An unexpected error occurred while starting the game.");
-        });
+    } catch (error) {
+        console.error("RegisterSales error:", error);
+        alert("An unexpected error occurred while starting the game.");
+        startButton.disabled = previousControls.start;
+        pauseButton.disabled = previousControls.pause;
+        openBtn.disabled = previousControls.open;
+        newGameBtn.disabled = previousControls.newGame;
+    }
 });
 
 
@@ -2417,7 +2420,10 @@ calledNumbers = pushed_number;     // Numbers already called
 
 // Load JSON once at page load
 fetch('cards.json')
-  .then(res => res.json())
+  .then(res => {
+    if (!res.ok) throw new Error(`cards.json is unavailable (${res.status}).`);
+    return res.json();
+  })
   .then(data => {
     bingoCards = data;
   })
@@ -2591,6 +2597,11 @@ function highlightBingo(card, numbers) {
   let lastNumber; // last pushed number
     let totalCount;
 newGameBtn.addEventListener("click", function() {
+    if (!startedTimePhp) {
+        alert("The current game has not been registered yet.");
+        return;
+    }
+    newGameBtn.disabled = true;
     // Get last number and count
     if (pushed_number.length === 0) {
         lastNumber = "0";
@@ -2607,10 +2618,9 @@ newGameBtn.addEventListener("click", function() {
   count: totalCount
 })
    .then(async data => {
-        // Match the World Bingo flow: persist the completed game first,
-        // then keep approved phones connected while opening the next round.
-        await window.api.mobileRoomNewRound().catch(() => {});
         if (data.status === "success") {
+            // Persist first, then keep approved phones connected for the next round.
+            await window.api.mobileRoomNewRound().catch(() => {});
             console.log("Sales updated successfully!");
 
             // --- Reset game variables ---
@@ -2736,7 +2746,10 @@ if (window.api && window.api.notifyBalance) {
 
             console.log("Game reset complete and ready for a new round.");
         } else {
-            console.log("Error: " + data.message);
+            console.error("Could not finish the game: " + data.message);
+            alert(data.message || "The game could not be saved. Please try again.");
+            newGameBtn.disabled = false;
+            return;
 
 
              // --- Reset game variables ---
@@ -2878,7 +2891,11 @@ if (window.api && window.api.notifyBalance) {
             console.log("Game reset complete and ready for a new round.");
         }
     })
-    .catch(err => console.error("AJAX error:", err));
+    .catch(err => {
+        console.error("Local game update error:", err);
+        alert("The game could not be saved. Please try again.");
+        newGameBtn.disabled = false;
+    });
 });
 
 

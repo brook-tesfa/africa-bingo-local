@@ -72,4 +72,5 @@ The supplied Windows Electron runtime is reused, but the prepared folder contain
 
 The `Windows release` GitHub Actions workflow runs the complete local-only test
 suite on Windows and builds an NSIS installer. Pushing a version tag such as
-`v4.1.1` publishes the resulting `.exe` on GitHub Releases automatically.
+`v4.1.2` runs the packaged application smoke test and publishes the resulting
+`.exe` on GitHub Releases automatically.

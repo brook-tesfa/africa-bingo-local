@@ -1,7 +1,7 @@
 {
   "name": "africa-bingo-local",
   "productName": "Africa Bingo Local",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "description": "Africa Bingo - fully local edition",
   "main": "main.js",
   "author": "Mart Softwares",

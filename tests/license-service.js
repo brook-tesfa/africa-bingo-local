@@ -42,7 +42,15 @@ try {
   const activated = service.activate(code);
   assert.equal(activated.deviceCode, deviceA);
   assert.equal(service.getStatus().valid, true);
+  const renewedCode = issueLicense({ bingoName: 'Africa Renewed Bingo' });
+  service.activate(renewedCode);
+  assert.equal(service.getStatus().license.bingoName, 'Africa Renewed Bingo', 'activation renewal must replace the existing file');
   assert.equal(service.verifyActivationCode(issueLicense({ deviceCode: deviceA })).deviceCode, deviceA, 'older unprefixed licenses must remain compatible');
+
+  fs.renameSync(service.licensePath, service.backupPath);
+  assert.equal(service.getStatus().valid, true, 'an interrupted activation must recover its backup');
+  assert.equal(fs.existsSync(service.licensePath), true);
+  assert.equal(fs.existsSync(service.backupPath), false);
 
   const restarted = new LicenseService({
     storageRoot: testRoot,
@@ -75,7 +83,7 @@ try {
     /expired/i
   );
 
-  console.log('license service passed (signature, device binding, persistence, copy rejection, expiry)');
+  console.log('license service passed (signature, device binding, renewal, recovery, persistence, copy rejection, expiry)');
 } finally {
   fs.rmSync(testRoot, { recursive: true, force: true });
 }

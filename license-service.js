@@ -37,6 +37,13 @@ class LicenseService {
     this.deviceCodeProvider = options.deviceCodeProvider;
     this.publicKey = options.publicKey || readBundledPublicKey();
     this.licensePath = options.licensePath || path.join(this.storageRoot, 'africa-bingo.license');
+    this.backupPath = `${this.licensePath}.bak`;
+  }
+
+  recoverInterruptedActivation() {
+    if (fs.existsSync(this.licensePath) || !fs.existsSync(this.backupPath)) return;
+    fs.mkdirSync(this.storageRoot, { recursive: true });
+    fs.renameSync(this.backupPath, this.licensePath);
   }
 
   getDeviceCode() {
@@ -132,16 +139,48 @@ class LicenseService {
   activate(activationCode) {
     const license = this.verifyActivationCode(activationCode);
     fs.mkdirSync(this.storageRoot, { recursive: true });
-    const temporaryPath = `${this.licensePath}.tmp`;
-    fs.writeFileSync(temporaryPath, String(activationCode).trim(), {
-      encoding: 'utf8',
-      mode: 0o600
-    });
-    fs.renameSync(temporaryPath, this.licensePath);
+    const temporaryPath = `${this.licensePath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+
+    try {
+      fs.writeFileSync(temporaryPath, String(activationCode).trim(), {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx'
+      });
+
+      fs.rmSync(this.backupPath, { force: true });
+      if (fs.existsSync(this.licensePath)) {
+        fs.renameSync(this.licensePath, this.backupPath);
+      }
+
+      try {
+        fs.renameSync(temporaryPath, this.licensePath);
+      } catch (error) {
+        if (!fs.existsSync(this.licensePath) && fs.existsSync(this.backupPath)) {
+          fs.renameSync(this.backupPath, this.licensePath);
+        }
+        throw error;
+      }
+
+      fs.rmSync(this.backupPath, { force: true });
+    } finally {
+      fs.rmSync(temporaryPath, { force: true });
+    }
     return license;
   }
 
   getStatus() {
+    try {
+      this.recoverInterruptedActivation();
+    } catch (error) {
+      return {
+        valid: false,
+        activated: true,
+        reason: 'LICENSE_STORAGE_ERROR',
+        message: `Could not recover the saved activation: ${error.message}`
+      };
+    }
+
     if (!fs.existsSync(this.licensePath)) {
       return {
         valid: false,

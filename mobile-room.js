@@ -9,6 +9,7 @@ const { EventEmitter } = require('node:events');
 
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 32 * 1024;
+const MAX_CLIENTS = 250;
 
 function normalizeMode(mode) {
   return mode === 'open' ? 'open' : 'approval';
@@ -405,7 +406,14 @@ class MobileRoom extends EventEmitter {
       .replace(/[\r\n\t]/g, ' ')
       .slice(0, 40) || 'Player';
 
-    const existing = this.clients.get(clientId) || {
+    const knownClient = this.clients.get(clientId);
+    if (!knownClient && this.clients.size >= MAX_CLIENTS) {
+      const error = new Error('This local room has reached its device limit.');
+      error.code = 'ROOM_FULL';
+      throw error;
+    }
+
+    const existing = knownClient || {
       id: clientId,
       approved: false,
       denied: false,
@@ -676,11 +684,19 @@ class MobileRoom extends EventEmitter {
     this.server = http.createServer((req, res) => {
       this.handleRequest(req, res).catch((error) => {
         console.error('Mobile room request failed:', error);
-        if (!res.headersSent) {
-          sendJson(res, 500, { ok: false, error: 'Local room request failed.' });
-        } else {
-          res.end();
-        }
+        if (res.destroyed || res.writableEnded) return;
+        try {
+          if (!res.headersSent) {
+            const statusCode = error.code === 'ROOM_FULL' ? 429 : 500;
+            sendJson(res, statusCode, {
+              ok: false,
+              code: error.code || 'LOCAL_ROOM_ERROR',
+              error: error.code === 'ROOM_FULL' ? error.message : 'Local room request failed.'
+            });
+          } else {
+            res.end();
+          }
+        } catch {}
       });
     });
 
@@ -772,7 +788,27 @@ class MobileRoom extends EventEmitter {
     this.clients.clear();
 
     if (server) {
-      await new Promise((resolve) => server.close(() => resolve()));
+      await new Promise((resolve) => {
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(forceCloseTimer);
+          resolve();
+        };
+        const forceCloseTimer = setTimeout(() => {
+          try { server.closeAllConnections?.(); } catch {}
+          finish();
+        }, 2000);
+        forceCloseTimer.unref?.();
+
+        try {
+          server.close(finish);
+          server.closeIdleConnections?.();
+        } catch {
+          finish();
+        }
+      });
     }
 
     this.emitStatus();

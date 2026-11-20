@@ -94,6 +94,7 @@ class MockBrowserWindow {
 const electronMock = {
   app: {
     isPackaged: false,
+    requestSingleInstanceLock: () => true,
     setPath() {},
     getPath: () => testRoot,
     whenReady: () => Promise.resolve(),
@@ -127,14 +128,19 @@ const electronMock = {
 class TestVoucherService {
   getDeviceCodeDisplay() { return 'TEST-DEVICE-CODE'; }
   verifyVoucher(code) {
-    if (code !== 'valid-test-voucher') throw new Error('Invalid voucher code.');
+    const index = code === 'valid-test-voucher'
+      ? 1
+      : code === 'valid-test-voucher-2'
+        ? 2
+        : 0;
+    if (!index) throw new Error('Invalid voucher code.');
     return {
-      voucherId: 'test-voucher-0001',
+      voucherId: `test-voucher-000${index}`,
       amount: 250,
       deviceCode: 'testdevicecode',
       issuedAt: '2026-11-18T00:00:00.000Z',
       expiresAt: '2030-01-01T00:00:00.000Z',
-      voucherHash: 'a'.repeat(64)
+      voucherHash: String(index).repeat(64)
     };
   }
 }
@@ -237,6 +243,15 @@ async function main() {
   assert.equal((await ipcHandlers.get('calculate-game-commission')(null, 8)).percent, 25);
   assert.equal((await ipcHandlers.get('calculate-game-commission')(null, 15)).percent, 7);
 
+  assert.equal((await ipcHandlers.get('update-game-time-gap')(null, 999)).success, false);
+  assert.equal((await ipcHandlers.get('update-game-time-gap')(null, 7000)).success, true);
+  assert.equal((await ipcHandlers.get('update-voices-game')(null, 'missing')).success, false);
+  assert.equal((await ipcHandlers.get('update-voices-game')(null, 'T')).success, true);
+  const updatedSettings = await ipcHandlers.get('get-shop-setting')();
+  assert.equal(updatedSettings.settings.gameTimeGap, 7000);
+  assert.equal(updatedSettings.settings.voicesGame, 'T');
+  assert.equal(updatedSettings.settings.commissionSettings.mode, 'interval');
+
   const rejectedCommission = await ipcHandlers.get('update-commission-game')(null, {
     ...customCommission,
     interval: {
@@ -262,34 +277,86 @@ async function main() {
   const invalidVoucher = await ipcHandlers.get('redeem-credit-voucher')(null, 'invalid');
   assert.equal(invalidVoucher.success, false);
 
-  const credited = await ipcHandlers.get('redeem-credit-voucher')(null, 'valid-test-voucher');
+  const [credited, creditedAgain] = await Promise.all([
+    ipcHandlers.get('redeem-credit-voucher')(null, 'valid-test-voucher'),
+    ipcHandlers.get('redeem-credit-voucher')(null, 'valid-test-voucher-2')
+  ]);
   assert.equal(credited.success, true, credited.message);
-  assert.equal(Number(credited.balance) - Number(beforeCredit.current_balance), 250);
+  assert.equal(creditedAgain.success, true, creditedAgain.message);
+  const afterCredit = await ipcHandlers.get('get-shop-info')();
+  assert.equal(Number(afterCredit.current_balance) - Number(beforeCredit.current_balance), 500);
 
   const replay = await ipcHandlers.get('redeem-credit-voucher')(null, 'valid-test-voucher');
   assert.equal(replay.success, false);
   assert.match(replay.message, /already been used/i);
 
-  const sale = await ipcHandlers.get('register-sales')({ sender: windows[0].webContents }, {
-    no_cards: 10,
-    price: 10,
-    collected: 100,
-    commission: 25
-  });
+  const balanceBeforeInvalidSales = (await ipcHandlers.get('check-balance')()).balance;
+  assert.equal((await ipcHandlers.get('register-sales')(null)).status, 'error');
+  assert.equal((await ipcHandlers.get('register-sales')(null, {
+    no_cards: 10, price: 10, collected: 90, commission: 25
+  })).status, 'error');
+  assert.equal((await ipcHandlers.get('register-sales')(null, {
+    no_cards: 10, price: 10, collected: 100, commission: -1
+  })).status, 'error');
+  assert.equal((await ipcHandlers.get('check-balance')()).balance, balanceBeforeInvalidSales);
+  assert.equal((await ipcHandlers.get('review-balance')(null, 'not-a-number')).status, 'error');
+
+  const [sale, reconciledAfterSale] = await Promise.all([
+    ipcHandlers.get('register-sales')({ sender: windows[0].webContents }, {
+      no_cards: 10,
+      price: 10,
+      collected: 100,
+      commission: 25
+    }),
+    ipcHandlers.get('reconcile-balance')()
+  ]);
   assert.equal(sale.status, 'success');
+  assert.equal(reconciledAfterSale.success, true, reconciledAfterSale.message);
 
   const afterSale = await ipcHandlers.get('get-shop-info')();
-  assert.equal(Number(credited.balance) - Number(afterSale.current_balance), 25);
+  assert.equal(Number(afterCredit.current_balance) - Number(afterSale.current_balance), 25);
+
+  assert.equal((await ipcHandlers.get('update-sales')(null, {
+    started_time: sale.started_time,
+    last_number: 76,
+    count: 1
+  })).status, 'error');
+  const completedSale = await ipcHandlers.get('update-sales')(null, {
+    started_time: sale.started_time,
+    last_number: 42,
+    count: 18
+  });
+  assert.equal(completedSale.status, 'success', completedSale.message);
+  const history = await ipcHandlers.get('get-sales-history')();
+  assert.equal(history.status, 'success');
+  assert.equal(history.data.length, 1);
+  assert.equal(history.data[0].commission, 25);
+
+  assert.equal((await ipcHandlers.get('get-daily-income')(null)).status, 'error');
+  assert.equal((await ipcHandlers.get('get-daily-income')(null, {
+    from_date: '2026-02-30', to_date: '2026-03-01'
+  })).status, 'error');
+  assert.equal((await ipcHandlers.get('get-daily-income')(null, {
+    from_date: '2026-12-01', to_date: '2026-01-01'
+  })).status, 'error');
+  const saleDate = sale.started_time.slice(0, 10);
+  const income = await ipcHandlers.get('get-daily-income')(null, {
+    from_date: saleDate,
+    to_date: saleDate
+  });
+  assert.equal(income.status, 'success');
+  assert.equal(income.total, '25.00');
 
   const loggedOut = await ipcHandlers.get('perform-logout')();
   assert.equal(loggedOut.success, true);
   assert.equal((await ipcHandlers.get('check-session')()).active, false);
+  assert.equal((await ipcHandlers.get('check-balance')()).status, 'error');
 
   for (const listener of appListeners.get('window-all-closed') || []) {
     await listener();
   }
 
-  console.log('local flow passed (account, login, custom commission, signed voucher, replay block, sale, logout, network deny)');
+  console.log('local flow passed (account, login, settings, concurrent vouchers, validation, sale lifecycle, logout, network deny)');
 }
 
 main().finally(() => {

@@ -12,12 +12,18 @@ const mobileRoomPath = path.join(root, 'mobile-room.js');
 const voucherServicePath = path.join(root, 'voucher-service.js');
 const commissionSettingsPath = path.join(root, 'commission-settings.js');
 const licenseServicePath = path.join(root, 'license-service.js');
+const gamePath = path.join(root, 'renderer', 'shop', 'game', 'game.html');
+const dataPath = path.join(root, 'renderer', 'shop', 'data', 'data.html');
+const workflowPath = path.join(root, '.github', 'workflows', 'windows-release.yml');
 const main = fs.readFileSync(mainPath, 'utf8');
 const preload = fs.readFileSync(preloadPath, 'utf8');
 const mobileRoom = fs.readFileSync(mobileRoomPath, 'utf8');
 const voucherService = fs.readFileSync(voucherServicePath, 'utf8');
 const commissionSettings = fs.readFileSync(commissionSettingsPath, 'utf8');
 const licenseService = fs.readFileSync(licenseServicePath, 'utf8');
+const game = fs.readFileSync(gamePath, 'utf8');
+const dataPage = fs.readFileSync(dataPath, 'utf8');
+const workflow = fs.readFileSync(workflowPath, 'utf8');
 
 for (const forbidden of [
   'africabingo.duckdns.org', "require('axios')", 'electron-updater', 'autoUpdater',
@@ -59,6 +65,13 @@ assert.equal(
 assert.match(main, /migrateLegacyPortableData/, 'legacy portable data migration is missing');
 assert.match(main, /showErrorBox/, 'silent startup failures must display a native error');
 assert.match(main, /unhandledRejection/, 'startup promise failures must be captured');
+assert.match(main, /requestSingleInstanceLock/, 'multiple app instances must not share one SQLite database');
+assert.match(main, /PRAGMA quick_check/, 'startup must verify SQLite integrity');
+assert.match(main, /withImmediateTransaction/, 'credit and sales writes must use the transaction queue');
+assert.match(main, /AsyncLocalStorage/, 'SQLite operations must not leak into another handler transaction');
+assert.match(main, /databaseQueue/, 'SQLite operations must share one operation gate');
+assert.match(main, /--smoke-test/, 'the packaged startup smoke mode is missing');
+assert.match(workflow, /Launch packaged Windows app/, 'Windows CI must launch the packaged executable');
 assert.match(main, /serializeCommissionSettings/, 'custom commission settings are not stored through the validator');
 assert.equal(main.includes('add-local-credit'), false, 'manual credit handler must not exist');
 assert.equal(preload.includes('addLocalCredit'), false, 'manual credit API must not exist');
@@ -82,6 +95,22 @@ assert.match(mobileRoom, /isAllowedClientAddress/, 'mobile requests must be rest
 assert.match(mobileRoom, /crypto\.randomBytes\(18\)/, 'mobile room must use a random session secret');
 assert.match(mobileRoom, /mode = 'approval'/, 'mobile devices must require host approval');
 assert.equal(/listen\([^\n]+(?:80|443)[),]/.test(mobileRoom), false, 'mobile room must not use public web ports');
+assert.match(mobileRoom, /closeAllConnections/, 'mobile room shutdown must have a bounded forced-close path');
+assert.match(mobileRoom, /MAX_CLIENTS/, 'mobile room must cap remembered phone clients');
+
+const voiceCodes = [...dataPage.matchAll(/class="voice_box" data-voice="([^"]+)"/g)]
+  .map(match => match[1]);
+for (const voiceCode of voiceCodes) {
+  for (let number = 1; number <= 75; number += 1) {
+    const fileCode = voiceCode === 'O' && number >= 61 ? 'o' : voiceCode;
+    assert.equal(
+      fs.existsSync(path.join(root, 'renderer', 'shop', 'game', 'audio', `${fileCode}${number}.mp3`)),
+      true,
+      `missing bundled audio for voice ${voiceCode}, number ${number}`
+    );
+  }
+}
+assert.equal(/\baudio\.onended\s*=/.test(game), false, 'game page references an undefined audio object');
 
 const handlers = new Set(
   [...main.matchAll(/ipcMain\.(?:handle|on)\('([^']+)'/g)].map(match => match[1])
