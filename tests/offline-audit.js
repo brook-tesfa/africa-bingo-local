@@ -50,6 +50,15 @@ assert.match(main, /calculate-game-commission/, 'local game commission calculato
 assert.match(main, /get-device-activation-status/, 'first-run device activation status handler is missing');
 assert.match(main, /activate-device-license/, 'signed device activation handler is missing');
 assert.match(main, /loadAuthorizedEntry/, 'startup device-activation gate is missing');
+assert.match(main, /app\.getPath\('userData'\)/, 'local data must use Electron userData');
+assert.equal(
+  main.includes("app.setPath('userData'"),
+  false,
+  'startup must not redirect userData to a missing or protected installation folder'
+);
+assert.match(main, /migrateLegacyPortableData/, 'legacy portable data migration is missing');
+assert.match(main, /showErrorBox/, 'silent startup failures must display a native error');
+assert.match(main, /unhandledRejection/, 'startup promise failures must be captured');
 assert.match(main, /serializeCommissionSettings/, 'custom commission settings are not stored through the validator');
 assert.equal(main.includes('add-local-credit'), false, 'manual credit handler must not exist');
 assert.equal(preload.includes('addLocalCredit'), false, 'manual credit API must not exist');

@@ -4,7 +4,7 @@ This is a local-only reconstruction of the supplied Africa Bingo Electron app.
 
 ## Download
 
-Download the signed-versioned Windows x64 installer from this repository's
+Download the versioned Windows x64 installer from this repository's
 **Releases** page. Release binaries are not committed into the source tree.
 
 ## What changed
@@ -27,7 +27,9 @@ Download the signed-versioned Windows x64 installer from this repository's
 - External CDN scripts and styles were removed from the renderer pages.
 - Server-era heartbeat, deposit/sales sync, pending-sync, and update-message IPC surfaces were removed.
 - Runtime dependencies were pruned to Electron, SQLite, and SQLite's two local loader modules; installer/download/proxy helpers are not shipped.
-- The mutable profile is portable and stored beside the executable in `africa-bingo-local-data`.
+- The mutable profile is stored in the current Windows user's local AppData profile, never in the protected installation directory.
+- Older `africa-bingo-local-data` profiles found beside the executable are migrated automatically without overwriting newer AppData files.
+- Startup failures display a native error and are recorded locally in `logs/startup.log` instead of closing silently.
 
 ## Run the prepared Windows app
 
@@ -43,11 +45,11 @@ To collect cartela numbers by phone, open **Mobile Cartela Room**. On Windows, s
 
 ## Local data
 
-The portable database is:
+The installed Windows database is:
 
-`africa-bingo-local-data/database/local.db`
+`%APPDATA%\Africa Bingo Local\database\local.db`
 
-Back up the entire `africa-bingo-local-data` folder to preserve accounts, credits, settings, and sales history.
+Back up `%APPDATA%\Africa Bingo Local` to preserve accounts, activation, credits, settings, and sales history. If startup fails, inspect `%APPDATA%\Africa Bingo Local\logs\startup.log`.
 
 ## Verification
 
@@ -70,4 +72,4 @@ The supplied Windows Electron runtime is reused, but the prepared folder contain
 
 The `Windows release` GitHub Actions workflow runs the complete local-only test
 suite on Windows and builds an NSIS installer. Pushing a version tag such as
-`v4.1.0` publishes the resulting `.exe` on GitHub Releases automatically.
+`v4.1.1` publishes the resulting `.exe` on GitHub Releases automatically.

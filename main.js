@@ -1,10 +1,74 @@
-const { app, BrowserWindow, clipboard, ipcMain, Menu, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, session, shell } = require('electron');
 const path = require('path');
 const { fileURLToPath } = require('node:url');
 const fs = require('fs');
 const crypto = require('crypto');
 
 const NETWORK_DISABLED_CODE = 'ERR_AFRICA_BINGO_NETWORK_DISABLED';
+const userDataRoot = app.getPath('userData');
+const legacyPortableRoot = path.join(path.dirname(process.execPath), 'africa-bingo-local-data');
+const startupLogPath = path.join(userDataRoot, 'logs', 'startup.log');
+
+function errorDetails(error) {
+  if (error instanceof Error) return error.stack || error.message;
+  return String(error || 'Unknown error');
+}
+
+function writeStartupLog(level, message) {
+  try {
+    fs.mkdirSync(path.dirname(startupLogPath), { recursive: true });
+    fs.appendFileSync(
+      startupLogPath,
+      `[${new Date().toISOString()}] ${level}: ${message}\n`,
+      'utf8'
+    );
+  } catch {
+    // A native error dialog is still attempted if the diagnostic log cannot be written.
+  }
+}
+
+function reportStartupFailure(context, error) {
+  const details = errorDetails(error);
+  writeStartupLog('FATAL', `${context}\n${details}`);
+  console.error(context, details);
+  try {
+    dialog.showErrorBox(
+      'Africa Bingo Local could not start',
+      `${context}\n\n${error?.message || String(error)}\n\nDiagnostic log:\n${startupLogPath}`
+    );
+  } catch {
+    // The log remains available if Electron cannot display a native dialog.
+  }
+}
+
+function migrateLegacyPortableData() {
+  if (!app.isPackaged) return;
+  if (path.resolve(legacyPortableRoot) === path.resolve(userDataRoot)) return;
+  if (!fs.existsSync(legacyPortableRoot)) return;
+
+  fs.mkdirSync(userDataRoot, { recursive: true });
+  const migrated = [];
+  for (const entry of ['database', 'africa-bingo.license', 'device-identity']) {
+    const source = path.join(legacyPortableRoot, entry);
+    const destination = path.join(userDataRoot, entry);
+    if (!fs.existsSync(source) || fs.existsSync(destination)) continue;
+    fs.cpSync(source, destination, {
+      recursive: true,
+      force: false,
+      errorOnExist: true
+    });
+    migrated.push(entry);
+  }
+
+  if (migrated.length) {
+    writeStartupLog('INFO', `Migrated legacy local data: ${migrated.join(', ')}`);
+  }
+}
+
+writeStartupLog(
+  'INFO',
+  `Starting Africa Bingo Local (packaged=${app.isPackaged}, userData=${userDataRoot})`
+);
 
 function networkDisabledError() {
   const error = new Error('Africa Bingo Local does not permit network access.');
@@ -58,7 +122,14 @@ function disableNodeNetworking() {
 }
 
 disableNodeNetworking();
-const sqlite3 = require('sqlite3').verbose();
+let sqlite3 = null;
+let sqliteLoadError = null;
+try {
+  sqlite3 = require('sqlite3').verbose();
+} catch (error) {
+  sqliteLoadError = error;
+  writeStartupLog('FATAL', `Could not load SQLite.\n${errorDetails(error)}`);
+}
 const MobileRoom = require('./mobile-room');
 const LocalPrivateNetwork = require('./local-private-network');
 const { VoucherService } = require('./voucher-service');
@@ -82,14 +153,12 @@ for (const flag of [
 }
 app.commandLine?.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND');
 
-// Keep the rebuilt app portable: all mutable state lives beside the executable.
-// The folder can be copied or backed up without depending on AppData or any remote service.
-const portableRoot = app.isPackaged ? path.dirname(process.execPath) : __dirname;
-app.setPath('userData', path.join(portableRoot, 'africa-bingo-local-data'));
-
-const voucherService = new VoucherService({ storageRoot: app.getPath('userData') });
+// Mutable state uses Electron's per-user AppData directory. Unlike an NSIS
+// installation directory, this path exists for the current user and is writable
+// without administrator permissions. It remains entirely local to the computer.
+const voucherService = new VoucherService({ storageRoot: userDataRoot });
 const licenseService = new LicenseService({
-  storageRoot: app.getPath('userData'),
+  storageRoot: userDataRoot,
   deviceCodeProvider: () => voucherService.getDeviceCode()
 });
 const mobileRoom = new MobileRoom({ assetsDir: path.join(__dirname, 'mobile') });
@@ -1858,62 +1927,87 @@ async function loadAuthorizedEntry(win) {
 
 // --- Create Window and Initialize DB ---
 function createWindow() {
-  Menu.setApplicationMenu(null);
-  configureOfflineNetworkGuard();
+  try {
+    migrateLegacyPortableData();
+    if (sqliteLoadError || !sqlite3) {
+      throw sqliteLoadError || new Error('The SQLite module is unavailable.');
+    }
 
-  const dbFolder = path.join(app.getPath('userData'), 'database');
-  if (!fs.existsSync(dbFolder)) fs.mkdirSync(dbFolder, { recursive: true });
-  const dbPath = path.join(dbFolder, 'local.db');
-  const bundledSeedDb = path.join(__dirname, 'database', 'local.db');
-  if (!fs.existsSync(dbPath) && fs.existsSync(bundledSeedDb) && fs.statSync(bundledSeedDb).size > 0) {
-    fs.copyFileSync(bundledSeedDb, dbPath);
-    console.log('Seeded the portable local database from the supplied profile.');
-  }
-  console.log(`Connecting to database at: ${dbPath}`);
+    Menu.setApplicationMenu(null);
+    configureOfflineNetworkGuard();
 
-  db = new sqlite3.Database(dbPath, (err) => {
-    if (err) return console.error('DB connection error:', err.message);
-    console.log('Database connected successfully.');
-    createTables(db);
+    const dbFolder = path.join(userDataRoot, 'database');
+    if (!fs.existsSync(dbFolder)) fs.mkdirSync(dbFolder, { recursive: true });
+    const dbPath = path.join(dbFolder, 'local.db');
+    const bundledSeedDb = path.join(__dirname, 'database', 'local.db');
+    if (!fs.existsSync(dbPath) && fs.existsSync(bundledSeedDb) && fs.statSync(bundledSeedDb).size > 0) {
+      fs.copyFileSync(bundledSeedDb, dbPath);
+      console.log('Seeded the local database from the supplied profile.');
+    }
+    console.log(`Connecting to database at: ${dbPath}`);
 
-    startBalanceReconciler();
-    startSalesChecker();
+    db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        reportStartupFailure('The local database could not be opened.', err);
+        app.quit();
+        return;
+      }
 
-    const win = new BrowserWindow({
-      width: 1200,
-      height: 800,
-      show: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        devTools: false
+      try {
+        console.log('Database connected successfully.');
+        createTables(db);
+
+        startBalanceReconciler();
+        startSalesChecker();
+
+        const win = new BrowserWindow({
+          width: 1200,
+          height: 800,
+          show: false,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+            devTools: false
+          }
+        });
+
+        win.once('ready-to-show', () => win.show());
+        secureWebContents(win.webContents);
+
+        // ⭐ did-finish-load: DevTools detection injection + game page unsynced-sales check
+        win.webContents.on('did-finish-load', async () => {
+          const currentUrl = win.webContents.getURL();
+          if (currentUrl.includes('locked.html')) return;
+
+          win.webContents.executeJavaScript(
+            'if (window.api && window.api.startDevToolsDetection) { window.api.startDevToolsDetection(); }'
+          ).catch(error => console.error('DevTools detection injection failed:', error));
+        });
+
+        loadAuthorizedEntry(win).catch(error => {
+          writeStartupLog('ERROR', `Could not load the authorized entry page.\n${errorDetails(error)}`);
+          win.loadFile(ACTIVATION_PAGE).catch(fallbackError => {
+            reportStartupFailure('The application screen could not be loaded.', fallbackError);
+            app.quit();
+          });
+        });
+      } catch (error) {
+        reportStartupFailure('The application window could not be created.', error);
+        app.quit();
       }
     });
-
-    win.once('ready-to-show', () => win.show());
-    secureWebContents(win.webContents);
-
-    // ⭐ did-finish-load: DevTools detection injection + game page unsynced-sales check
-    win.webContents.on('did-finish-load', async () => {
-      const currentUrl = win.webContents.getURL();
-      if (currentUrl.includes('locked.html')) return;
-
-      win.webContents.executeJavaScript(
-        'if (window.api && window.api.startDevToolsDetection) { window.api.startDevToolsDetection(); }'
-      ).catch(err => console.error('DevTools detection injection failed:', err));
-
-
-    });
-    loadAuthorizedEntry(win).catch(error => {
-      console.error('Could not load the authorized entry page:', error);
-      win.loadFile(ACTIVATION_PAGE);
-    });
-  });
+  } catch (error) {
+    reportStartupFailure('Africa Bingo Local failed during startup.', error);
+    app.quit();
+  }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(createWindow).catch(error => {
+  reportStartupFailure('Electron could not finish starting.', error);
+  app.quit();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -1931,8 +2025,13 @@ app.on('before-quit', () => {
   stopSalesChecker();
 });
 
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error.stack || error.message);
+process.on('uncaughtException', error => {
+  reportStartupFailure('An unexpected main-process error stopped the application.', error);
+  app.quit();
+});
+
+process.on('unhandledRejection', error => {
+  reportStartupFailure('An unexpected startup task failed.', error);
   app.quit();
 });
 
